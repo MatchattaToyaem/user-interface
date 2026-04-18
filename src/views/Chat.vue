@@ -1,3 +1,680 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/userStore'
+import { authService } from '@/services/authService'
+import ChatMessages from '@/components/ChatMessages.vue'
+import ChatInput from '@/components/ChatInput.vue'
+import DocViewer from '@/components/DocViewer.vue'
+import mainLogo from '@/assets/oconnors-logo.png'
+import aiLogo from '@/assets/ai-logo.png'
+import chatLogo from '@/assets/chat-logo.png'
+import docLogo from '@/assets/doc-logo.png'
+import attachLogo from '@/assets/attach-logo.png'
+
+type MessageDocument = {
+  id: string
+  name: string
+  file: File
+}
+
+type MessageRole = 'user' | 'assistant' | 'thinking' | 'comparison_result'
+
+type Message = {
+  id: number
+  role: MessageRole
+  text: string
+  fileNames?: string[]
+  docReference?: string
+  documents?: MessageDocument[]
+  compared?: boolean
+  comparisonOptions?: {
+    left: string
+    right: string
+  }
+  chosenOption?: 'left' | 'right' | null
+}
+
+type ChatItem = {
+  id: number
+  name: string
+  messages: Message[]
+  selectedDocumentId?: string | null
+}
+
+const router = useRouter()
+const userStore = useUserStore()
+
+const activeMode = ref<'chat' | 'doc'>('chat')
+const isConnected = ref(false)
+const isSidebarExpanded = ref(true)
+const isBrandHovered = ref(false)
+const isLeavingPage = ref(false)
+const isDocViewerOpen = ref(false)
+const isDocLoading = ref(false)
+const docLoadToken = ref(0)
+const inputValue = ref('')
+const searchQuery = ref('')
+const docSearchQuery = ref('')
+const openMenuChatId = ref<number | null>(null)
+const animatedText = ref('')
+const attachedFiles = ref<File[]>([])
+const previewFile = ref<File | null>(null)
+const previewFileUrl = ref('')
+const assistantReplyCount = ref(0)
+const typingSpeed = 18
+
+const comparisonPromptProbability = 0.28
+const comparisonLabels = [
+  { left: 'Option 1', right: 'Option 2' },
+  { left: 'Response 1', right: 'Response 2' },
+  { left: 'Version 1', right: 'Version 2' }
+]
+
+const phrases = [
+  'Ask about specific projects',
+  'Upload a manual for reference',
+  'Troubleshoot a problem'
+]
+
+let phraseIndex = 0
+let charIndex = 0
+let isDeleting = false
+let typeTimeout: number | null = null
+const activeTypingIntervals = new Set<number>()
+
+const displayName = computed(() => {
+  const fullName = userStore.account?.name?.trim() || 'User'
+  return fullName.split(' ')[0]
+})
+
+const displayRole = computed(() => {
+  const email = userStore.account?.username?.toLowerCase() || ''
+
+  if (email.includes('student')) return 'Student'
+  if (email.includes('staff')) return 'Staff'
+  if (email.includes('admin')) return 'Admin'
+
+  return 'User'
+})
+
+const userInitial = computed(() => displayName.value.charAt(0).toUpperCase())
+const userPhoto = computed(() => (userStore as any).account?.idTokenClaims?.picture || '')
+
+const chats = ref<ChatItem[]>([
+  {
+    id: 1,
+    name: 'New Chat',
+    messages: [],
+    selectedDocumentId: null
+  }
+])
+
+const selectedChatId = ref(1)
+let nextChatId = 2
+let nextMessageId = 1
+
+const currentChat = computed(() => {
+  return chats.value.find(chat => chat.id === selectedChatId.value) || null
+})
+
+const filteredChats = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  if (!query) return chats.value
+  return chats.value.filter(chat => chat.name.toLowerCase().includes(query))
+})
+
+const selectedChatName = computed(() => {
+  const selected = chats.value.find(chat => chat.id === selectedChatId.value)
+  return selected?.name || 'New Chat'
+})
+
+const showWelcome = computed(() => {
+  return !!currentChat.value &&
+    currentChat.value.messages.length === 0 &&
+    inputValue.value.trim() === ''
+})
+
+const supportedPreviewText = computed(() => {
+  return 'PDF, Word and Excel previews are supported'
+})
+
+const currentPreviewFileName = computed(() => {
+  return previewFile.value?.name || 'No document selected'
+})
+
+const isPdfPreview = computed(() => {
+  return !!previewFile.value && previewFile.value.name.toLowerCase().endsWith('.pdf')
+})
+
+const isImagePreview = computed(() => {
+  if (!previewFile.value) return false
+  const lower = previewFile.value.name.toLowerCase()
+  return (
+    lower.endsWith('.png') ||
+    lower.endsWith('.jpg') ||
+    lower.endsWith('.jpeg') ||
+    lower.endsWith('.webp')
+  )
+})
+
+const isWordPreview = computed(() => {
+  if (!previewFile.value) return false
+  const lower = previewFile.value.name.toLowerCase()
+  return lower.endsWith('.doc') || lower.endsWith('.docx')
+})
+
+const isExcelPreview = computed(() => {
+  if (!previewFile.value) return false
+  const lower = previewFile.value.name.toLowerCase()
+  return lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.endsWith('.csv')
+})
+
+const officeViewerUrl = computed(() => {
+  if (!previewFileUrl.value) return ''
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewFileUrl.value)}`
+})
+
+function typeLoop() {
+  const currentPhrase = phrases[phraseIndex]
+
+  if (!isDeleting) {
+    charIndex++
+    animatedText.value = currentPhrase.substring(0, charIndex)
+  } else {
+    charIndex--
+    animatedText.value = currentPhrase.substring(0, charIndex)
+  }
+
+  let speed = isDeleting ? 45 : 75
+
+  if (!isDeleting && charIndex === currentPhrase.length) {
+    speed = 1100
+    isDeleting = true
+  } else if (isDeleting && charIndex === 0) {
+    isDeleting = false
+    phraseIndex = (phraseIndex + 1) % phrases.length
+    speed = 350
+  }
+
+  typeTimeout = window.setTimeout(typeLoop, speed)
+}
+
+function typeAssistantMessage(fullText: string, done: (typed: string) => void) {
+  let index = 0
+  let typed = ''
+
+  const interval = window.setInterval(() => {
+    typed += fullText[index]
+    done(typed)
+    index++
+
+    if (index >= fullText.length) {
+      clearInterval(interval)
+      activeTypingIntervals.delete(interval)
+    }
+  }, typingSpeed)
+
+  activeTypingIntervals.add(interval)
+}
+
+function toggleSidebar() {
+  isSidebarExpanded.value = !isSidebarExpanded.value
+}
+
+function handleBrandButtonClick() {
+  if (!isSidebarExpanded.value) {
+    isSidebarExpanded.value = true
+  }
+}
+
+async function expandAndFocusSearch() {
+  isSidebarExpanded.value = true
+  await nextTick()
+}
+
+function closeMenuOutside() {
+  openMenuChatId.value = null
+}
+
+function handleSearchEnter() {
+  const firstMatch = filteredChats.value[0]
+  if (firstMatch) {
+    selectedChatId.value = firstMatch.id
+  }
+}
+
+function toggleMenu(chatId: number) {
+  openMenuChatId.value = openMenuChatId.value === chatId ? null : chatId
+}
+
+function selectChatById(chatId: number) {
+  selectedChatId.value = chatId
+  openMenuChatId.value = null
+}
+
+function renameChat(chatId: number) {
+  const chat = chats.value.find(item => item.id === chatId)
+  if (!chat) return
+
+  const newName = window.prompt('Rename chat', chat.name)
+
+  if (newName && newName.trim()) {
+    chat.name = newName.trim()
+  }
+
+  openMenuChatId.value = null
+}
+
+function deleteChat(chatId: number) {
+  if (chats.value.length === 1) {
+    chats.value[0] = {
+      id: chats.value[0].id,
+      name: 'New Chat',
+      messages: [],
+      selectedDocumentId: null
+    }
+    selectedChatId.value = chats.value[0].id
+    openMenuChatId.value = null
+    inputValue.value = ''
+    attachedFiles.value = []
+    clearPreviewFile()
+    return
+  }
+
+  const chatIndex = chats.value.findIndex(chat => chat.id === chatId)
+  if (chatIndex === -1) return
+
+  chats.value.splice(chatIndex, 1)
+
+  if (selectedChatId.value === chatId) {
+    selectedChatId.value = chats.value[0].id
+    inputValue.value = ''
+    attachedFiles.value = []
+    syncPreviewFileFromChat(chats.value[0] || null)
+  }
+
+  openMenuChatId.value = null
+}
+
+function startNewChat() {
+  const newChat: ChatItem = {
+    id: nextChatId++,
+    name: 'New Chat',
+    messages: [],
+    selectedDocumentId: null
+  }
+
+  chats.value.unshift(newChat)
+  selectedChatId.value = newChat.id
+  inputValue.value = ''
+  searchQuery.value = ''
+  attachedFiles.value = []
+  openMenuChatId.value = null
+  assistantReplyCount.value = 0
+  clearPreviewFile()
+}
+
+function setChatMode() {
+  activeMode.value = 'chat'
+  isDocViewerOpen.value = false
+}
+
+function triggerDocLoading(duration = 420) {
+  const token = Date.now()
+  docLoadToken.value = token
+  isDocLoading.value = true
+
+  window.setTimeout(() => {
+    if (docLoadToken.value === token) {
+      isDocLoading.value = false
+    }
+  }, duration)
+}
+
+function openDocViewerPanel() {
+  activeMode.value = 'doc'
+  syncPreviewFileFromCurrentChat()
+  triggerDocLoading()
+  isDocViewerOpen.value = true
+}
+
+function closeDocViewerPanel() {
+  isDocViewerOpen.value = false
+  activeMode.value = 'chat'
+}
+
+function handleFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const files = target.files
+
+  if (!files || files.length === 0) return
+
+  const newFiles = Array.from(files)
+
+  for (const file of newFiles) {
+    const exists = attachedFiles.value.some(
+      existing =>
+        existing.name === file.name &&
+        existing.lastModified === file.lastModified &&
+        existing.size === file.size
+    )
+
+    if (!exists) {
+      attachedFiles.value.push(file)
+    }
+  }
+
+  if (!previewFile.value && attachedFiles.value.length > 0) {
+    setPreviewFile(attachedFiles.value[0])
+  }
+}
+
+function removeAttachedFile(fileToRemove: File) {
+  const wasPreview =
+    previewFile.value &&
+    previewFile.value.name === fileToRemove.name &&
+    previewFile.value.lastModified === fileToRemove.lastModified &&
+    previewFile.value.size === fileToRemove.size
+
+  attachedFiles.value = attachedFiles.value.filter(
+    file =>
+      !(
+        file.name === fileToRemove.name &&
+        file.lastModified === fileToRemove.lastModified &&
+        file.size === fileToRemove.size
+      )
+  )
+
+  if (wasPreview) {
+    if (attachedFiles.value.length > 0) {
+      setPreviewFile(attachedFiles.value[0])
+    } else {
+      clearPreviewFile()
+    }
+  }
+}
+
+function getFileBadge(fileName: string) {
+  const extension = fileName.split('.').pop()?.toLowerCase() || ''
+
+  if (extension === 'pdf') return 'PDF'
+  if (['doc', 'docx'].includes(extension)) return 'DOC'
+  if (['xls', 'xlsx', 'csv'].includes(extension)) return 'XLS'
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 'IMG'
+  return 'FILE'
+}
+
+function setPreviewFile(file: File) {
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+
+  previewFile.value = file
+  previewFileUrl.value = URL.createObjectURL(file)
+}
+
+function clearPreviewFile() {
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+
+  previewFile.value = null
+  previewFileUrl.value = ''
+}
+
+function createMessageDocuments(files: File[]): MessageDocument[] {
+  return files.map((file, index) => ({
+    id: `${file.name}-${file.lastModified}-${file.size}-${index}-${Date.now()}`,
+    name: file.name,
+    file
+  }))
+}
+
+function findDocumentByIdInChat(chat: ChatItem | null, documentId: string | null | undefined) {
+  if (!chat || !documentId) return null
+
+  for (const message of chat.messages) {
+    if (!message.documents || !message.documents.length) continue
+
+    const found = message.documents.find(document => document.id === documentId)
+    if (found) return found
+  }
+
+  return null
+}
+
+function findFirstDocumentInChat(chat: ChatItem | null) {
+  if (!chat) return null
+
+  for (const message of chat.messages) {
+    if (message.documents && message.documents.length) {
+      return message.documents[0]
+    }
+  }
+
+  return null
+}
+
+function syncPreviewFileFromChat(chat: ChatItem | null) {
+  if (!chat) {
+    clearPreviewFile()
+    return
+  }
+
+  const selectedDocument = findDocumentByIdInChat(chat, chat.selectedDocumentId)
+
+  if (selectedDocument) {
+    triggerDocLoading(320)
+    setPreviewFile(selectedDocument.file)
+    return
+  }
+
+  const firstDocument = findFirstDocumentInChat(chat)
+
+  if (firstDocument) {
+    chat.selectedDocumentId = firstDocument.id
+    triggerDocLoading(320)
+    setPreviewFile(firstDocument.file)
+    return
+  }
+
+  clearPreviewFile()
+}
+
+function syncPreviewFileFromCurrentChat() {
+  syncPreviewFileFromChat(currentChat.value)
+}
+
+function maybeAttachComparisonPrompt(targetMessage: Message) {
+  assistantReplyCount.value++
+
+  if (assistantReplyCount.value <= 1) return
+
+  const shouldShow = Math.random() < comparisonPromptProbability
+  if (!shouldShow) return
+
+  const randomLabels =
+    comparisonLabels[Math.floor(Math.random() * comparisonLabels.length)]
+
+  targetMessage.compared = true
+  targetMessage.comparisonOptions = {
+    left: randomLabels.left,
+    right: randomLabels.right
+  }
+  targetMessage.chosenOption = null
+}
+
+function chooseComparisonOption(messageId: number, option: 'left' | 'right') {
+  const chat = currentChat.value
+  if (!chat) return
+
+  const targetIndex = chat.messages.findIndex(msg => msg.id === messageId)
+  if (targetIndex === -1) return
+
+  const target = chat.messages[targetIndex]
+  if (!target || !target.compared || !target.comparisonOptions) return
+
+  target.chosenOption = option
+
+  const selectedTitle =
+    option === 'left'
+      ? target.comparisonOptions.left
+      : target.comparisonOptions.right
+
+  window.setTimeout(() => {
+    chat.messages.splice(targetIndex + 1, 0, {
+      id: nextMessageId++,
+      role: 'comparison_result',
+      text: `You selected ${selectedTitle}. I understand. This is a sample response area where the chatbot answer will appear.`,
+      documents: target.documents,
+      fileNames: target.fileNames
+    })
+  }, 260)
+}
+
+function isDocumentSelected(documentId: string) {
+  const chat = currentChat.value
+  if (!chat) return false
+  return chat.selectedDocumentId === documentId
+}
+
+function openDocumentFromMessage(document: MessageDocument) {
+  const chat = currentChat.value
+  if (chat) {
+    chat.selectedDocumentId = document.id
+  }
+
+  triggerDocLoading()
+  setPreviewFile(document.file)
+  activeMode.value = 'doc'
+  isDocViewerOpen.value = true
+}
+
+function sendMessage() {
+  const text = inputValue.value.trim()
+
+  if (!text && !attachedFiles.value.length) return
+  if (!currentChat.value) return
+
+  const userFiles = [...attachedFiles.value]
+  const fileNames = userFiles.map(file => file.name)
+  const messageDocuments = createMessageDocuments(userFiles)
+
+  currentChat.value.messages.push({
+    id: nextMessageId++,
+    role: 'user',
+    text,
+    fileNames,
+    documents: messageDocuments
+  })
+
+  inputValue.value = ''
+
+  const thinkingMessageId = nextMessageId++
+
+  currentChat.value.messages.push({
+    id: thinkingMessageId,
+    role: 'thinking',
+    text: ''
+  })
+
+  const firstAttachedFile = userFiles.length ? userFiles[0] : null
+  const firstMessageDocument = messageDocuments.length ? messageDocuments[0] : null
+
+  if (firstMessageDocument && currentChat.value) {
+    currentChat.value.selectedDocumentId = firstMessageDocument.id
+    setPreviewFile(firstMessageDocument.file)
+  }
+
+  attachedFiles.value = []
+
+  window.setTimeout(() => {
+    const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
+    if (!selectedChat) return
+
+    const thinkingIndex = selectedChat.messages.findIndex(
+      msg => msg.id === thinkingMessageId
+    )
+
+    if (thinkingIndex !== -1) {
+      const assistantMessage: Message = {
+        id: nextMessageId++,
+        role: 'assistant',
+        text: '',
+        fileNames: fileNames.length ? [...fileNames] : undefined,
+        documents: messageDocuments,
+        docReference: firstAttachedFile ? `Pg 1: ${firstAttachedFile.name}` : undefined
+      }
+
+      maybeAttachComparisonPrompt(assistantMessage)
+
+      selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
+
+      typeAssistantMessage(
+        'I understand. This is a sample response area where the chatbot answer will appear.',
+        (typed) => {
+          const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
+          if (!liveChat) return
+
+          const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
+          if (!liveMessage) return
+
+          liveMessage.text = typed
+        }
+      )
+    }
+  }, 1800)
+}
+
+async function handleLogout() {
+  isLeavingPage.value = true
+  await new Promise(resolve => setTimeout(resolve, 260))
+  await authService.logout()
+  router.push('/login')
+}
+
+watch(selectedChatId, () => {
+  syncPreviewFileFromCurrentChat()
+})
+
+watch(isDocViewerOpen, (isOpen) => {
+  if (isOpen) {
+    syncPreviewFileFromCurrentChat()
+  }
+})
+
+watch(activeMode, (mode) => {
+  if (mode === 'doc') {
+    syncPreviewFileFromCurrentChat()
+  }
+})
+
+onMounted(() => {
+  window.setTimeout(() => {
+    isConnected.value = true
+  }, 1800)
+
+  window.addEventListener('click', closeMenuOutside)
+  typeLoop()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeMenuOutside)
+
+  if (typeTimeout !== null) {
+    clearTimeout(typeTimeout)
+  }
+
+  activeTypingIntervals.forEach(interval => clearInterval(interval))
+  activeTypingIntervals.clear()
+
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+})
+</script>
+
 <template>
   <div class="chat-page">
     <div class="page-transition-overlay" :class="{ active: isLeavingPage }"></div>
@@ -60,16 +737,16 @@
           <button
             class="nav-item"
             :class="{ active: activeMode === 'chat' }"
-            @click="activeMode = 'chat'"
+            @click="setChatMode"
           >
-            <img :src="mainLogo" alt="Chatbot" class="nav-image-icon nav-chat-logo" />
+            <img :src="aiLogo" alt="Chatbot" class="nav-image-icon nav-chat-logo" />
             <span>Chatbot</span>
           </button>
 
           <button
             class="nav-item"
             :class="{ active: activeMode === 'doc' }"
-            @click="activeMode = 'doc'"
+            @click="openDocViewerPanel"
           >
             <img :src="docLogo" alt="Document viewer" class="nav-image-icon" />
             <span>Chat + Doc Viewer</span>
@@ -88,7 +765,7 @@
               @click="selectChatById(chat.id)"
             >
               <div class="history-left">
-                <img :src="mainLogo" alt="Chat" class="history-img-icon" />
+                <img :src="chatLogo" alt="Chat" class="history-img-icon" />
                 <span class="history-text">{{ chat.name }}</span>
               </div>
 
@@ -130,18 +807,18 @@
           <button
             class="collapsed-rail-item"
             :class="{ active: activeMode === 'chat' }"
-            @click="activeMode = 'chat'"
+            @click="setChatMode"
             title="Chatbot"
             aria-label="Chatbot"
           >
-            <img :src="mainLogo" alt="Chatbot" class="collapsed-rail-icon collapsed-chat-logo" />
+            <img :src="aiLogo" alt="Chatbot" class="collapsed-rail-icon collapsed-chat-logo" />
             <span class="collapsed-tooltip">Chatbot</span>
           </button>
 
           <button
             class="collapsed-rail-item"
             :class="{ active: activeMode === 'doc' }"
-            @click="activeMode = 'doc'"
+            @click="openDocViewerPanel"
             title="Chat + Doc Viewer"
             aria-label="Chat + Doc Viewer"
           >
@@ -165,7 +842,7 @@
             title="New Chat"
             aria-label="New Chat"
           >
-            <img :src="mainLogo" alt="New Chat" class="collapsed-rail-icon collapsed-chat-logo" />
+            <img :src="chatLogo" alt="New Chat" class="collapsed-rail-icon collapsed-chat-logo" />
             <span class="collapsed-tooltip">New Chat</span>
           </button>
 
@@ -177,7 +854,7 @@
             :title="selectedChatName"
             aria-label="Current selected chat"
           >
-            <img :src="mainLogo" alt="Current Chat" class="collapsed-rail-icon collapsed-chat-logo" />
+            <img :src="chatLogo" alt="Current Chat" class="collapsed-rail-icon collapsed-chat-logo" />
             <span class="collapsed-tooltip current-chat-tooltip">
               {{ selectedChatName }}
             </span>
@@ -206,499 +883,78 @@
       </template>
     </aside>
 
-    <main class="main-content">
-      <header class="topbar">
-        <div class="topbar-left">
-          <h1>Chatbot Assistant</h1>
+    <main class="main-content" :class="{ 'doc-open': isDocViewerOpen }">
+      <div class="chat-panel">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h1>Chatbot Assistant</h1>
 
-          <transition name="fade-slide" mode="out-in">
-            <span v-if="isConnected" key="ready" class="status-pill ready">
-              <span class="status-dot ready-dot"></span>
-              Ready
-            </span>
+            <transition name="fade-slide" mode="out-in">
+              <span v-if="isConnected" key="ready" class="status-pill ready">
+                <span class="status-dot ready-dot"></span>
+                Ready
+              </span>
 
-            <span v-else key="connecting" class="status-pill connecting">
-              <span class="status-dot connecting-dot"></span>
-              Connecting...
-            </span>
-          </transition>
-        </div>
-
-        <button class="new-chat-btn" @click="startNewChat">
-          ＋ New Chat
-        </button>
-      </header>
-
-      <section class="chat-body" @click="openMenuChatId = null">
-        <transition name="fade-up">
-          <div v-if="showWelcome" class="welcome-card">
-            <div class="welcome-logo-wrap">
-              <div class="pulse-ring pulse-ring-1"></div>
-              <div class="pulse-ring pulse-ring-2"></div>
-              <div class="welcome-logo">
-                <img :src="mainLogo" alt="O'Connors AI" />
-              </div>
-            </div>
-
-            <h2>How can I help you today, {{ displayName }} ?</h2>
-
-            <p class="typing-text">
-              {{ animatedText }}<span class="cursor">|</span>
-            </p>
-          </div>
-        </transition>
-
-        <div v-if="currentChat && currentChat.messages.length > 0" class="messages">
-          <div
-            v-for="message in currentChat.messages"
-            :key="message.id"
-            class="message-row"
-            :class="message.role"
-          >
-            <div
-              v-if="message.role === 'assistant' || message.role === 'thinking'"
-              class="assistant-icon"
-            >
-              <img :src="aiLogo" alt="AI" />
-            </div>
-
-            <div
-              class="message-bubble"
-              :class="{ thinkingBubble: message.role === 'thinking' }"
-            >
-              <template v-if="message.role === 'thinking'">
-                <div class="thinking-dots">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              </template>
-
-              <template v-else>
-                <div
-                  v-if="message.fileNames && message.fileNames.length"
-                  class="message-file-chip-row"
-                >
-                  <div
-                    v-for="fileName in message.fileNames"
-                    :key="fileName"
-                    class="message-file-chip"
-                    :class="{ userFileChip: message.role === 'user' }"
-                  >
-                    <div class="file-badge">{{ getFileBadge(fileName) }}</div>
-                    <span class="message-file-name">{{ fileName }}</span>
-                  </div>
-                </div>
-
-                <div v-if="message.text">{{ message.text }}</div>
-              </template>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <footer class="chat-input-wrap">
-        <div class="chat-input-shell">
-          <div v-if="attachedFiles.length" class="attached-files-row">
-            <div
-              v-for="file in attachedFiles"
-              :key="file.name + file.lastModified + file.size"
-              class="attached-file-chip"
-            >
-              <div class="attached-file-left">
-                <div class="file-badge">{{ getFileBadge(file.name) }}</div>
-                <span class="attached-file-name">{{ file.name }}</span>
-              </div>
-
-              <button
-                class="remove-file-btn"
-                @click="removeAttachedFile(file)"
-                aria-label="Remove file"
-              >
-                ×
-              </button>
-            </div>
+              <span v-else key="connecting" class="status-pill connecting">
+                <span class="status-dot connecting-dot"></span>
+                Connecting...
+              </span>
+            </transition>
           </div>
 
-          <div class="chat-input-bar">
-            <input
-              ref="fileInputRef"
-              type="file"
-              class="hidden-file-input"
-              multiple
-              @change="handleFileChange"
-            />
+          <button class="new-chat-btn" @click="startNewChat">
+            ＋ New Chat
+          </button>
+        </header>
 
-            <button class="attach-btn" @click="openFilePicker">
-              <img :src="attachLogo" alt="Attach file" class="attach-btn-icon" />
-            </button>
+        <ChatMessages
+          :current-chat="currentChat"
+          :show-welcome="showWelcome"
+          :display-name="displayName"
+          :animated-text="animatedText"
+          :main-logo="mainLogo"
+          :ai-logo="mainLogo"
+          :is-document-selected="isDocumentSelected"
+          :get-file-badge="getFileBadge"
+          @close-menu="openMenuChatId = null"
+          @open-document="openDocumentFromMessage"
+          @choose-comparison="chooseComparisonOption"
+        />
 
-            <input
-              v-model="inputValue"
-              type="text"
-              :placeholder="
-                attachedFiles.length
-                  ? 'Ask about this document...'
-                  : 'Ask a question or describe an issue...'
-              "
-              @keyup.enter="sendMessage"
-            />
+        <ChatInput
+          :input-value="inputValue"
+          :attached-files="attachedFiles"
+          :attach-logo="attachLogo"
+          :get-file-badge="getFileBadge"
+          @update-input="inputValue = $event"
+          @add-files="handleFileChange"
+          @remove-file="removeAttachedFile"
+          @send-message="sendMessage"
+        />
+      </div>
 
-            <button class="send-btn" @click="sendMessage">➤</button>
-          </div>
-        </div>
-      </footer>
+      <DocViewer
+        :is-open="isDocViewerOpen"
+        :current-chat="currentChat"
+        :preview-file="previewFile"
+        :preview-file-url="previewFileUrl"
+        :current-preview-file-name="currentPreviewFileName"
+        :doc-search-query="docSearchQuery"
+        :is-doc-loading="isDocLoading"
+        :is-pdf-preview="isPdfPreview"
+        :is-word-preview="isWordPreview"
+        :is-excel-preview="isExcelPreview"
+        :is-image-preview="isImagePreview"
+        :office-viewer-url="officeViewerUrl"
+        :supported-preview-text="supportedPreviewText"
+        :doc-logo="docLogo"
+        :get-file-badge="getFileBadge"
+        @close="closeDocViewerPanel"
+        @update-search="docSearchQuery = $event"
+      />
     </main>
   </div>
 </template>
-
-<script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useUserStore } from '@/stores/userStore'
-import { authService } from '@/services/authService'
-import mainLogo from '@/assets/oconnors-logo.png'
-import aiLogo from '@/assets/ai-logo.png'
-import docLogo from '@/assets/doc-logo.png'
-import attachLogo from '@/assets/attach-logo.png'
-
-type MessageRole = 'user' | 'assistant' | 'thinking'
-
-type Message = {
-  id: number
-  role: MessageRole
-  text: string
-  fileNames?: string[]
-}
-
-type ChatItem = {
-  id: number
-  name: string
-  messages: Message[]
-}
-
-const router = useRouter()
-const userStore = useUserStore()
-
-const activeMode = ref<'chat' | 'doc'>('chat')
-const isConnected = ref(false)
-const isSidebarExpanded = ref(true)
-const isBrandHovered = ref(false)
-const isLeavingPage = ref(false)
-const inputValue = ref('')
-const searchQuery = ref('')
-const openMenuChatId = ref<number | null>(null)
-const animatedText = ref('')
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const attachedFiles = ref<File[]>([])
-
-const phrases = [
-  'Ask about specific projects',
-  'Upload a manual for reference',
-  'Troubleshoot a problem'
-]
-
-let phraseIndex = 0
-let charIndex = 0
-let isDeleting = false
-let typeTimeout: number | null = null
-
-const displayName = computed(() => {
-  const fullName = userStore.account?.name?.trim() || 'User'
-  return fullName.split(' ')[0]
-})
-
-const displayRole = computed(() => {
-  const email = userStore.account?.username?.toLowerCase() || ''
-
-  if (email.includes('student')) return 'Student'
-  if (email.includes('staff')) return 'Staff'
-  if (email.includes('admin')) return 'Admin'
-
-  return 'User'
-})
-
-const userInitial = computed(() => displayName.value.charAt(0).toUpperCase())
-const userPhoto = computed(() => (userStore as any).account?.idTokenClaims?.picture || '')
-
-const chats = ref<ChatItem[]>([
-  {
-    id: 1,
-    name: 'New Chat',
-    messages: []
-  }
-])
-
-const selectedChatId = ref(1)
-let nextChatId = 2
-let nextMessageId = 1
-
-const currentChat = computed(() => {
-  return chats.value.find(chat => chat.id === selectedChatId.value) || null
-})
-
-const filteredChats = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return chats.value
-  return chats.value.filter(chat => chat.name.toLowerCase().includes(query))
-})
-
-const selectedChatName = computed(() => {
-  const selected = chats.value.find(chat => chat.id === selectedChatId.value)
-  return selected?.name || 'New Chat'
-})
-
-const showWelcome = computed(() => {
-  return !!currentChat.value &&
-    currentChat.value.messages.length === 0 &&
-    inputValue.value.trim() === ''
-})
-
-function typeLoop() {
-  const currentPhrase = phrases[phraseIndex]
-
-  if (!isDeleting) {
-    charIndex++
-    animatedText.value = currentPhrase.substring(0, charIndex)
-  } else {
-    charIndex--
-    animatedText.value = currentPhrase.substring(0, charIndex)
-  }
-
-  let speed = isDeleting ? 45 : 75
-
-  if (!isDeleting && charIndex === currentPhrase.length) {
-    speed = 1100
-    isDeleting = true
-  } else if (isDeleting && charIndex === 0) {
-    isDeleting = false
-    phraseIndex = (phraseIndex + 1) % phrases.length
-    speed = 350
-  }
-
-  typeTimeout = window.setTimeout(typeLoop, speed)
-}
-
-function toggleSidebar() {
-  isSidebarExpanded.value = !isSidebarExpanded.value
-}
-
-function handleBrandButtonClick() {
-  if (!isSidebarExpanded.value) {
-    isSidebarExpanded.value = true
-  }
-}
-
-async function expandAndFocusSearch() {
-  isSidebarExpanded.value = true
-  await nextTick()
-}
-
-function closeMenuOutside() {
-  openMenuChatId.value = null
-}
-
-function handleSearchEnter() {
-  const firstMatch = filteredChats.value[0]
-  if (firstMatch) {
-    selectedChatId.value = firstMatch.id
-  }
-}
-
-function toggleMenu(chatId: number) {
-  openMenuChatId.value = openMenuChatId.value === chatId ? null : chatId
-}
-
-function selectChatById(chatId: number) {
-  selectedChatId.value = chatId
-  openMenuChatId.value = null
-}
-
-function renameChat(chatId: number) {
-  const chat = chats.value.find(item => item.id === chatId)
-  if (!chat) return
-
-  const newName = window.prompt('Rename chat', chat.name)
-
-  if (newName && newName.trim()) {
-    chat.name = newName.trim()
-  }
-
-  openMenuChatId.value = null
-}
-
-function deleteChat(chatId: number) {
-  if (chats.value.length === 1) {
-    chats.value[0] = {
-      id: chats.value[0].id,
-      name: 'New Chat',
-      messages: []
-    }
-    selectedChatId.value = chats.value[0].id
-    openMenuChatId.value = null
-    inputValue.value = ''
-    attachedFiles.value = []
-    return
-  }
-
-  const chatIndex = chats.value.findIndex(chat => chat.id === chatId)
-  if (chatIndex === -1) return
-
-  chats.value.splice(chatIndex, 1)
-
-  if (selectedChatId.value === chatId) {
-    selectedChatId.value = chats.value[0].id
-    inputValue.value = ''
-    attachedFiles.value = []
-  }
-
-  openMenuChatId.value = null
-}
-
-function startNewChat() {
-  const newChat: ChatItem = {
-    id: nextChatId++,
-    name: 'New Chat',
-    messages: []
-  }
-
-  chats.value.unshift(newChat)
-  selectedChatId.value = newChat.id
-  inputValue.value = ''
-  searchQuery.value = ''
-  attachedFiles.value = []
-  openMenuChatId.value = null
-
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
-  }
-}
-
-function openFilePicker() {
-  fileInputRef.value?.click()
-}
-
-function handleFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  const files = target.files
-
-  if (!files || files.length === 0) return
-
-  const newFiles = Array.from(files)
-
-  for (const file of newFiles) {
-    const exists = attachedFiles.value.some(
-      existing =>
-        existing.name === file.name &&
-        existing.lastModified === file.lastModified &&
-        existing.size === file.size
-    )
-
-    if (!exists) {
-      attachedFiles.value.push(file)
-    }
-  }
-
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
-  }
-}
-
-function removeAttachedFile(fileToRemove: File) {
-  attachedFiles.value = attachedFiles.value.filter(
-    file =>
-      !(
-        file.name === fileToRemove.name &&
-        file.lastModified === fileToRemove.lastModified &&
-        file.size === fileToRemove.size
-      )
-  )
-
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
-  }
-}
-
-function getFileBadge(fileName: string) {
-  const extension = fileName.split('.').pop()?.toLowerCase() || ''
-
-  if (extension === 'pdf') return 'PDF'
-  if (['doc', 'docx'].includes(extension)) return 'DOC'
-  if (['xls', 'xlsx', 'csv'].includes(extension)) return 'XLS'
-  if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 'IMG'
-  return 'FILE'
-}
-
-function sendMessage() {
-  const text = inputValue.value.trim()
-
-  if (!text && !attachedFiles.value.length) return
-  if (!currentChat.value) return
-
-  currentChat.value.messages.push({
-    id: nextMessageId++,
-    role: 'user',
-    text,
-    fileNames: attachedFiles.value.map(file => file.name)
-  })
-
-  inputValue.value = ''
-
-  const thinkingMessageId = nextMessageId++
-
-  currentChat.value.messages.push({
-    id: thinkingMessageId,
-    role: 'thinking',
-    text: ''
-  })
-
-  attachedFiles.value = []
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
-  }
-
-  window.setTimeout(() => {
-    const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
-    if (!selectedChat) return
-
-    const thinkingIndex = selectedChat.messages.findIndex(
-      msg => msg.id === thinkingMessageId
-    )
-
-    if (thinkingIndex !== -1) {
-      selectedChat.messages.splice(thinkingIndex, 1, {
-        id: nextMessageId++,
-        role: 'assistant',
-        text: 'I understand. This is a sample response area where the chatbot answer will appear.'
-      })
-    }
-  }, 1200)
-}
-
-async function handleLogout() {
-  isLeavingPage.value = true
-  await new Promise(resolve => setTimeout(resolve, 260))
-  await authService.logout()
-  router.push('/login')
-}
-
-onMounted(() => {
-  window.setTimeout(() => {
-    isConnected.value = true
-  }, 1800)
-
-  window.addEventListener('click', closeMenuOutside)
-  typeLoop()
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('click', closeMenuOutside)
-
-  if (typeTimeout !== null) {
-    clearTimeout(typeTimeout)
-  }
-})
-</script>
 
 <style scoped>
 .chat-page {
@@ -1286,9 +1542,21 @@ onBeforeUnmount(() => {
 .main-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
   min-width: 0;
   position: relative;
+  overflow: hidden;
+}
+
+.chat-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  transition: width 0.34s ease;
+}
+
+.main-content.doc-open .chat-panel {
+  width: calc(100% - 48%);
 }
 
 .topbar {
@@ -1380,391 +1648,9 @@ onBeforeUnmount(() => {
   background: rgba(19, 135, 255, 0.06);
 }
 
-.chat-body {
-  flex: 1;
-  position: relative;
-  overflow-y: auto;
-  padding: 28px 28px 16px;
-}
-
-.welcome-card {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: fit-content;
-  height: fit-content;
-  text-align: center;
-  max-width: 640px;
-}
-
-.welcome-logo-wrap {
-  position: relative;
-  width: 88px;
-  height: 88px;
-  margin: 0 auto 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.pulse-ring {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(37, 99, 235, 0.12);
-  animation: heartbeatGlow 2s infinite ease-in-out;
-}
-
-.pulse-ring-1 {
-  width: 88px;
-  height: 88px;
-}
-
-.pulse-ring-2 {
-  width: 112px;
-  height: 112px;
-  animation-delay: 0.35s;
-}
-
-.welcome-logo {
-  position: relative;
-  z-index: 2;
-  width: 62px;
-  height: 62px;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #2b8cff, #176be8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 28px rgba(37, 99, 235, 0.45);
-  overflow: hidden;
-}
-
-.welcome-logo img {
-  width: 72%;
-  height: 72%;
-  object-fit: contain;
-  filter: drop-shadow(0 0 16px rgba(37, 99, 235, 0.55));
-}
-
-.welcome-card h2 {
-  margin: 0 0 16px;
-  font-size: 28px;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.typing-text {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.7;
-  color: #9098ad;
-  min-height: 28px;
-}
-
-.cursor {
-  display: inline-block;
-  margin-left: 4px;
-  color: #4da3ff;
-  animation: blinkCursor 1s infinite;
-}
-
-.messages {
-  max-width: 980px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding-bottom: 24px;
-}
-
-.message-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-}
-
-.message-row.user {
-  justify-content: flex-end;
-}
-
-.message-row.assistant,
-.message-row.thinking {
-  justify-content: flex-start;
-}
-
-.assistant-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #2b8cff, #176be8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 18px rgba(37, 99, 235, 0.24);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.assistant-icon img {
-  width: 72%;
-  height: 72%;
-  object-fit: contain;
-}
-
-.message-bubble {
-  max-width: 690px;
-  padding: 16px 18px;
-  border-radius: 20px;
-  font-size: 15px;
-  line-height: 1.65;
-}
-
-.message-row.user .message-bubble {
-  background: linear-gradient(180deg, rgba(35, 42, 58, 0.95), rgba(25, 31, 45, 0.95));
-  color: #f4f7ff;
-  border-top-right-radius: 8px;
-}
-
-.message-row.assistant .message-bubble,
-.message-row.thinking .message-bubble {
-  background: linear-gradient(180deg, rgba(10, 17, 31, 0.98), rgba(8, 13, 24, 0.98));
-  color: #dfe6f5;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
-  border-top-left-radius: 8px;
-}
-
-.message-file-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.message-file-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  max-width: 260px;
-  padding: 6px 10px;
-  border-radius: 12px;
-  background: rgba(18, 24, 38, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.userFileChip {
-  background: rgba(28, 35, 52, 0.96);
-}
-
-.message-file-name {
-  color: #cdd6ea;
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.thinkingBubble {
-  min-width: 84px;
-  min-height: 56px;
-  display: flex;
-  align-items: center;
-}
-
-.thinking-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.thinking-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #8fb9ff;
-  animation: thinkingBounce 1.2s infinite ease-in-out;
-}
-
-.thinking-dots span:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.thinking-dots span:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-.chat-input-wrap {
-  padding: 0 0 22px;
-}
-
-.chat-input-shell {
-  width: min(980px, calc(100% - 80px));
-  margin: 0 auto;
-}
-
-.hidden-file-input {
-  display: none;
-}
-
-.attached-files-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.attached-file-chip {
-  height: 42px;
-  max-width: 280px;
-  padding: 0 12px;
-  border-radius: 14px;
-  background: rgba(11, 17, 30, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
-}
-
-.attached-file-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.file-badge {
-  min-width: 34px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 7px;
-  background: rgba(255, 119, 119, 0.16);
-  color: #ff8b8b;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.attached-file-name {
-  color: #aeb8cf;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.remove-file-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: #aeb8cf;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.remove-file-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #ffffff;
-}
-
-.chat-input-bar {
-  width: 100%;
-  height: 58px;
-  border-radius: 29px;
-  background: rgba(10, 15, 28, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 0 40px rgba(0, 102, 255, 0.08),
-    inset 0 0 24px rgba(255, 255, 255, 0.02);
-  display: flex;
-  align-items: center;
-  padding: 0 10px 0 14px;
-}
-
-.attach-btn {
-  width: 42px;
-  height: 42px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.22s ease, box-shadow 0.22s ease, background 0.22s ease;
-}
-
-.attach-btn:hover {
-  transform: scale(1.06);
-  background: rgba(19, 135, 255, 0.08);
-  box-shadow: 0 0 18px rgba(19, 135, 255, 0.22);
-}
-
-.attach-btn-icon {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.22));
-}
-
-.chat-input-bar input[type='text'] {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #e7ebf5;
-  font-size: 15px;
-  padding: 0 14px;
-}
-
-.chat-input-bar input[type='text']::placeholder {
-  color: #727b90;
-}
-
-.send-btn {
-  width: 46px;
-  height: 46px;
-  border: none;
-  border-radius: 50%;
-  background: linear-gradient(180deg, #2f8cff, #1771eb);
-  color: white;
-  font-size: 18px;
-  cursor: pointer;
-  box-shadow: 0 0 18px rgba(47, 140, 255, 0.35);
-  transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
-}
-
-.send-btn:hover {
-  transform: scale(1.12);
-  box-shadow:
-    0 0 18px rgba(47, 140, 255, 0.35),
-    0 0 34px rgba(47, 140, 255, 0.38),
-    0 0 52px rgba(47, 140, 255, 0.18);
-  filter: brightness(1.05);
-}
-
-.fade-up-enter-active,
-.fade-up-leave-active,
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: all 0.3s ease;
-}
-
-.fade-up-enter-from,
-.fade-up-leave-to {
-  opacity: 0;
-  transform: translateY(18px);
 }
 
 .fade-slide-enter-from,
@@ -1774,54 +1660,21 @@ onBeforeUnmount(() => {
 }
 
 @keyframes heartbeatGlow {
-  0% {
-    transform: scale(0.9);
-    opacity: 0.25;
-  }
-  25% {
-    transform: scale(1.02);
-    opacity: 0.45;
-  }
-  40% {
-    transform: scale(0.96);
-    opacity: 0.3;
-  }
-  60% {
-    transform: scale(1.08);
-    opacity: 0.5;
-  }
-  100% {
-    transform: scale(1.2);
-    opacity: 0;
-  }
+  0% { transform: scale(0.9); opacity: 0.25; }
+  25% { transform: scale(1.02); opacity: 0.45; }
+  40% { transform: scale(0.96); opacity: 0.3; }
+  60% { transform: scale(1.08); opacity: 0.5; }
+  100% { transform: scale(1.2); opacity: 0; }
 }
 
 @keyframes blink {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
-@keyframes blinkCursor {
-  0%, 50%, 100% {
-    opacity: 1;
-  }
-  25%, 75% {
-    opacity: 0;
-  }
-}
-
-@keyframes thinkingBounce {
-  0%, 80%, 100% {
-    transform: translateY(0);
-    opacity: 0.45;
-  }
-  40% {
-    transform: translateY(-5px);
-    opacity: 1;
+@media (max-width: 1100px) {
+  .main-content.doc-open .chat-panel {
+    width: calc(100% - 44%);
   }
 }
 
@@ -1851,20 +1704,8 @@ onBeforeUnmount(() => {
     font-size: 18px;
   }
 
-  .chat-input-shell {
-    width: calc(100% - 24px);
-  }
-
-  .welcome-card h2 {
-    font-size: 22px;
-  }
-
-  .typing-text {
-    font-size: 14px;
-  }
-
-  .message-bubble {
-    max-width: 82%;
+  .main-content.doc-open .chat-panel {
+    width: 100%;
   }
 }
 </style>
