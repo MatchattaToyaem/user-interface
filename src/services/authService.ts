@@ -1,5 +1,5 @@
 import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
-import type { Configuration, RedirectRequest, AuthenticationResult } from "@azure/msal-browser";
+import type { Configuration, RedirectRequest, AuthenticationResult, AccountInfo } from "@azure/msal-browser";
 
 const msalConfig: Configuration = {
   auth: {
@@ -26,8 +26,44 @@ export interface BackendTokenResult {
   expiresIn: number; // seconds
 }
 
+function extractFirstName(account: AccountInfo): string {
+  const fullName = account.name?.trim();
+
+  if (fullName) {
+    return fullName.split(" ")[0];
+  }
+
+  const emailName = account.username?.split("@")[0] || "User";
+  const firstPart = emailName.split(/[._-]/)[0];
+
+  return firstPart.charAt(0).toUpperCase() + firstPart.slice(1).toLowerCase();
+}
+
+function extractRole(account: AccountInfo): string {
+  const email = account.username?.toLowerCase() || "";
+
+  if (email.includes("student")) {
+    return "Student";
+  }
+
+  if (email.includes("staff")) {
+    return "Staff";
+  }
+
+  return "User";
+}
+
+function storeUserDetails(account: AccountInfo) {
+  const firstName = extractFirstName(account);
+  const role = extractRole(account);
+
+  localStorage.setItem("userFirstName", firstName);
+  localStorage.setItem("userRole", role);
+  localStorage.setItem("userFullName", account.name || firstName);
+  localStorage.setItem("userEmail", account.username || "");
+}
+
 export const authService = {
-  // Track initialization state to prevent redundant calls
   isInitialized: false,
 
   async initialize() {
@@ -35,31 +71,42 @@ export const authService = {
       await msalInstance.initialize();
       this.isInitialized = true;
     }
-    return msalInstance.handleRedirectPromise();
+
+    const response = await msalInstance.handleRedirectPromise();
+
+    if (response?.account) {
+      storeUserDetails(response.account);
+      msalInstance.setActiveAccount(response.account);
+    }
+
+    const existingAccount = msalInstance.getAllAccounts()[0];
+    if (existingAccount) {
+      msalInstance.setActiveAccount(existingAccount);
+      storeUserDetails(existingAccount);
+    }
+
+    return response;
   },
 
   async login() {
-    // Ensure MSAL is initialized before attempting login
     await this.initialize();
 
     try {
-      // 1. Actually check if there are already accounts
       const currentAccounts = msalInstance.getAllAccounts();
+
       if (currentAccounts.length > 0) {
-        // User is already logged in
-        return currentAccounts[0]; 
+        const account = currentAccounts[0];
+        msalInstance.setActiveAccount(account);
+        storeUserDetails(account);
+        return account;
       }
 
-      // 2. If no accounts, redirect to Microsoft login
-      // Include offline_access so Azure AD issues a refresh token
       const request = { scopes: ["openid", "profile", "User.Read", "offline_access"] };
       await msalInstance.loginRedirect(request);
-      // Page navigates away — no return value
 
     } catch (error: any) {
-      // 3. Handle the specific "interaction_in_progress" error
       if (error.errorCode === "interaction_in_progress") {
-        console.warn("An interaction is already in progress. Please check for an open popup window.");
+        console.warn("An interaction is already in progress.");
       } else {
         console.error("Login failed:", error);
       }
@@ -69,13 +116,28 @@ export const authService = {
 
   logout() {
     this.clearBackendTokens();
+    localStorage.removeItem("userFirstName");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("userFullName");
+    localStorage.removeItem("userEmail");
     return msalInstance.logoutRedirect();
   },
 
-  // ── Azure AD token (used only for the initial exchange) ──
+  getCurrentUser() {
+    const account = msalInstance.getActiveAccount() || msalInstance.getAllAccounts()[0] || null;
+
+    if (!account) return null;
+
+    return {
+      fullName: account.name || "User",
+      firstName: extractFirstName(account),
+      role: extractRole(account),
+      email: account.username || "",
+    };
+  },
 
   async getAzureToken(): Promise<string | null> {
-    const account = msalInstance.getAllAccounts()[0];
+    const account = msalInstance.getActiveAccount() || msalInstance.getAllAccounts()[0];
     if (!account) return null;
 
     try {
@@ -86,17 +148,22 @@ export const authService = {
       return tokenResponse.accessToken;
     } catch (error) {
       if (error instanceof InteractionRequiredAuthError) {
-        await msalInstance.acquireTokenRedirect({ ...loginRequest, account });
-        return null;
+        try {
+          await msalInstance.acquireTokenRedirect({
+            ...loginRequest,
+            account: account
+          });
+          return null;
+        } catch (redirectError) {
+          console.error("Redirect token acquisition failed:", redirectError);
+          throw redirectError;
+        }
       }
       console.error("Azure token acquisition failed:", error);
       throw error;
     }
   },
 
-  // ── Backend token management ──
-
-  /** Exchange an Azure AD token for platform access + refresh tokens. */
   async exchangeToken(): Promise<BackendTokenResult | null> {
     const azureToken = await this.getAzureToken();
     if (!azureToken) return null;
@@ -117,7 +184,6 @@ export const authService = {
     return data;
   },
 
-  /** Use the stored refresh token to get a new access + refresh token pair. */
   async refreshBackendToken(): Promise<BackendTokenResult | null> {
     const refreshToken = sessionStorage.getItem('refreshToken');
     if (!refreshToken) return null;
@@ -159,30 +225,20 @@ export const authService = {
     return ms ? new Date(Number(ms)) : null;
   },
 
-  /**
-   * Get a valid backend access token. Tries (in order):
-   * 1. Return the cached token if still valid
-   * 2. Refresh using the stored refresh token
-   * 3. Full exchange with a fresh Azure AD token
-   */
   async getValidBackendToken(): Promise<BackendTokenResult | null> {
     const token = this.getBackendAccessToken();
     const expiry = this.getBackendTokenExpiry();
 
-    // Still valid with ≥ 2 min buffer
     if (token && expiry && expiry.getTime() - Date.now() > 2 * 60 * 1000) {
       return { accessToken: token, refreshToken: sessionStorage.getItem('refreshToken')!, expiresIn: Math.floor((expiry.getTime() - Date.now()) / 1000) };
     }
 
-    // Try refresh
     const refreshed = await this.refreshBackendToken();
     if (refreshed) return refreshed;
 
-    // Fallback: full exchange
     return await this.exchangeToken();
   },
 
-  // Keep legacy getToken for backwards compatibility
   async getToken(): Promise<string | null> {
     const result = await this.getValidBackendToken();
     return result?.accessToken ?? null;
