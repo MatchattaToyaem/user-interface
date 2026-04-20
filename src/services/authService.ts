@@ -1,5 +1,5 @@
 import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
-import type { Configuration, RedirectRequest } from "@azure/msal-browser";
+import type { Configuration, RedirectRequest, AuthenticationResult } from "@azure/msal-browser";
 
 const msalConfig: Configuration = {
   auth: {
@@ -17,6 +17,14 @@ export const msalInstance = new PublicClientApplication(msalConfig);
 export const loginRequest: RedirectRequest = {
   scopes: ["api://6011c93e-17a3-4d85-b297-49422fc7fe97/access_as_user"]
 };
+
+const AUTH_API_BASE = 'http://localhost:8081';
+
+export interface BackendTokenResult {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number; // seconds
+}
 
 export const authService = {
   // Track initialization state to prevent redundant calls
@@ -43,7 +51,8 @@ export const authService = {
       }
 
       // 2. If no accounts, redirect to Microsoft login
-      const request = { scopes: ["openid", "profile", "User.Read"] };
+      // Include offline_access so Azure AD issues a refresh token
+      const request = { scopes: ["openid", "profile", "User.Read", "offline_access"] };
       await msalInstance.loginRedirect(request);
       // Page navigates away — no return value
 
@@ -59,40 +68,123 @@ export const authService = {
   },
 
   logout() {
+    this.clearBackendTokens();
     return msalInstance.logoutRedirect();
   },
 
-  async getToken() {
+  // ── Azure AD token (used only for the initial exchange) ──
+
+  async getAzureToken(): Promise<string | null> {
     const account = msalInstance.getAllAccounts()[0];
     if (!account) return null;
 
     try {
-      // Attempt to get the token silently without prompting the user
-      const tokenResponse = await msalInstance.acquireTokenSilent({
+      const tokenResponse: AuthenticationResult = await msalInstance.acquireTokenSilent({
         ...loginRequest,
-        account: account
+        account,
       });
-      console.log("Access token:", tokenResponse.accessToken);
       return tokenResponse.accessToken;
-
     } catch (error) {
-      // Fallback: If silent request fails, ask the user to interact
       if (error instanceof InteractionRequiredAuthError) {
-        try {
-          await msalInstance.acquireTokenRedirect({
-            ...loginRequest,
-            account: account
-          });
-          // Page navigates away for re-authentication
-          return null;
-        } catch (redirectError) {
-          console.error("Redirect token acquisition failed:", redirectError);
-          throw redirectError;
-        }
+        await msalInstance.acquireTokenRedirect({ ...loginRequest, account });
+        return null;
       }
-      
-      console.error("Token acquisition failed:", error);
+      console.error("Azure token acquisition failed:", error);
       throw error;
     }
+  },
+
+  // ── Backend token management ──
+
+  /** Exchange an Azure AD token for platform access + refresh tokens. */
+  async exchangeToken(): Promise<BackendTokenResult | null> {
+    const azureToken = await this.getAzureToken();
+    if (!azureToken) return null;
+
+    const response = await fetch(`${AUTH_API_BASE}/api/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ azureToken }),
+    });
+
+    if (!response.ok) {
+      console.error('Token exchange failed:', response.status);
+      return null;
+    }
+
+    const data: BackendTokenResult = await response.json();
+    this.storeBackendTokens(data);
+    return data;
+  },
+
+  /** Use the stored refresh token to get a new access + refresh token pair. */
+  async refreshBackendToken(): Promise<BackendTokenResult | null> {
+    const refreshToken = sessionStorage.getItem('refreshToken');
+    if (!refreshToken) return null;
+
+    const response = await fetch(`${AUTH_API_BASE}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    if (!response.ok) {
+      this.clearBackendTokens();
+      return null;
+    }
+
+    const data: BackendTokenResult = await response.json();
+    this.storeBackendTokens(data);
+    return data;
+  },
+
+  storeBackendTokens(tokens: BackendTokenResult) {
+    sessionStorage.setItem('backendAccessToken', tokens.accessToken);
+    sessionStorage.setItem('refreshToken', tokens.refreshToken);
+    sessionStorage.setItem('tokenExpiry', String(Date.now() + tokens.expiresIn * 1000));
+  },
+
+  clearBackendTokens() {
+    sessionStorage.removeItem('backendAccessToken');
+    sessionStorage.removeItem('refreshToken');
+    sessionStorage.removeItem('tokenExpiry');
+  },
+
+  getBackendAccessToken(): string | null {
+    return sessionStorage.getItem('backendAccessToken');
+  },
+
+  getBackendTokenExpiry(): Date | null {
+    const ms = sessionStorage.getItem('tokenExpiry');
+    return ms ? new Date(Number(ms)) : null;
+  },
+
+  /**
+   * Get a valid backend access token. Tries (in order):
+   * 1. Return the cached token if still valid
+   * 2. Refresh using the stored refresh token
+   * 3. Full exchange with a fresh Azure AD token
+   */
+  async getValidBackendToken(): Promise<BackendTokenResult | null> {
+    const token = this.getBackendAccessToken();
+    const expiry = this.getBackendTokenExpiry();
+
+    // Still valid with ≥ 2 min buffer
+    if (token && expiry && expiry.getTime() - Date.now() > 2 * 60 * 1000) {
+      return { accessToken: token, refreshToken: sessionStorage.getItem('refreshToken')!, expiresIn: Math.floor((expiry.getTime() - Date.now()) / 1000) };
+    }
+
+    // Try refresh
+    const refreshed = await this.refreshBackendToken();
+    if (refreshed) return refreshed;
+
+    // Fallback: full exchange
+    return await this.exchangeToken();
+  },
+
+  // Keep legacy getToken for backwards compatibility
+  async getToken(): Promise<string | null> {
+    const result = await this.getValidBackendToken();
+    return result?.accessToken ?? null;
   }
 };

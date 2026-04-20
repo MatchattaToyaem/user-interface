@@ -1,26 +1,25 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useUserStore } from '@/stores/userStore';
 import { authService } from '@/services/authService';
 import { useChatService } from '@/services/websocketService'
 
-interface Chat { id: number; title: string }
+interface Chat { id: string; title: string }
 
 const { messages, isConnected, isLoading, connect, disconnect, sendMessage: wsSendMessage } = useChatService()
 const userStore = useUserStore();
 const newMessage = ref('');
-const activeChatId = ref(1);
+const activeChatId = ref('5c5d8242-0fa3-4601-b1dc-1033330bc4c0');
 const senderName = computed(() => userStore.account?.name ?? 'Unknown User');
 
 onMounted(() => connect());
-onUnmounted(() => disconnect());
 
 const chats = ref<Chat[]>([
-    { id: 1, title: 'General Chat' },
-    { id: 2, title: 'Project Discussion' },
+    { id: "5c5d8242-0fa3-4601-b1dc-1033330bc4c0", title: 'General Chat' },
+    { id: "5c5d8242-0fa3-4601-b1dc-1033330bc4c0", title: 'Project Discussion' },
 ]);
 
-const selectChat = (id: number) => { activeChatId.value = id; };
+const selectChat = (id: string) => { activeChatId.value = id; };
 
 const sidebarOpen = ref(true);
 const toggleSidebar = () => { sidebarOpen.value = !sidebarOpen.value; };
@@ -28,7 +27,7 @@ const toggleSidebar = () => { sidebarOpen.value = !sidebarOpen.value; };
 const logout = () => authService.logout();
 
 const addChat = () => {
-    const id = Date.now();
+    const id = Date.now().toString();
     chats.value.push({ id, title: `Chat ${chats.value.length + 1}` });
     activeChatId.value = id;
 };
@@ -36,8 +35,9 @@ const addChat = () => {
 const sendMessage = () => {
     if (!newMessage.value.trim()) return;
     wsSendMessage({
-        message: newMessage.value,
+        sessionId: String(activeChatId.value),
         sender: senderName.value,
+        message: newMessage.value,
     });
     newMessage.value = '';
 };
