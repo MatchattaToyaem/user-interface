@@ -64,28 +64,30 @@ function storeUserDetails(account: AccountInfo) {
 }
 
 export const authService = {
-  isInitialized: false,
+  _initPromise: null as Promise<AuthenticationResult | null> | null,
 
   async initialize() {
-    if (!this.isInitialized) {
-      await msalInstance.initialize();
-      this.isInitialized = true;
+    if (!this._initPromise) {
+      this._initPromise = (async () => {
+        await msalInstance.initialize();
+
+        const response = await msalInstance.handleRedirectPromise();
+
+        if (response?.account) {
+          storeUserDetails(response.account);
+          msalInstance.setActiveAccount(response.account);
+        }
+
+        const existingAccount = msalInstance.getAllAccounts()[0];
+        if (existingAccount) {
+          msalInstance.setActiveAccount(existingAccount);
+          storeUserDetails(existingAccount);
+        }
+
+        return response;
+      })();
     }
-
-    const response = await msalInstance.handleRedirectPromise();
-
-    if (response?.account) {
-      storeUserDetails(response.account);
-      msalInstance.setActiveAccount(response.account);
-    }
-
-    const existingAccount = msalInstance.getAllAccounts()[0];
-    if (existingAccount) {
-      msalInstance.setActiveAccount(existingAccount);
-      storeUserDetails(existingAccount);
-    }
-
-    return response;
+    return this._initPromise;
   },
 
   async login() {
@@ -105,9 +107,7 @@ export const authService = {
       await msalInstance.loginRedirect(request);
 
     } catch (error: any) {
-      if (error.errorCode === "interaction_in_progress") {
-        console.warn("An interaction is already in progress.");
-      } else {
+      if (error.errorCode !== "interaction_in_progress") {
         console.error("Login failed:", error);
       }
       throw error;
