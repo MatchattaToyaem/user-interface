@@ -8,7 +8,7 @@ import { authService } from '@/services/authService';
 /** Reconnect 2 minutes before access-token expiry. */
 const REFRESH_BUFFER_MS = 2 * 60 * 1000;
 
-export function useChatService() {
+export function useChatService(onMessageReceived?: (msg: MessageResponse) => void) {
     const messages = ref<{ id: number; text: string; sender: string }[]>([]);
     const isConnected = ref(false);
     const isLoading = ref(false);
@@ -41,7 +41,7 @@ export function useChatService() {
     };
 
     const stompClient = new Client({
-        brokerURL: 'ws://localhost:8082/ws',
+        brokerURL: (import.meta.env.VITE_CHAT_SERVICE_URL || 'http://localhost:8082').replace(/^http/, 'ws') + '/ws',
         beforeConnect: async () => {
             const result = await authService.getValidBackendToken();
             if (result) {
@@ -60,6 +60,7 @@ export function useChatService() {
                     sender: body.sender,
                 });
                 isLoading.value = false;
+                onMessageReceived?.(body);
             });
         },
         onDisconnect: () => {

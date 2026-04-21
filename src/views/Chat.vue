@@ -3,6 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
+import { chatSessionService, type ChatHistoryEntry } from '@/services/chatSessionService'
+import { useChatService } from '@/services/websocketService'
+import type { MessageResponse } from '@/models/messageResponse'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import DocViewer from '@/components/DocViewer.vue'
@@ -37,6 +40,7 @@ type Message = {
 
 type ChatItem = {
   id: number
+  sessionId: string
   name: string
   messages: Message[]
   selectedDocumentId?: string | null
@@ -45,8 +49,55 @@ type ChatItem = {
 const router = useRouter()
 const userStore = useUserStore()
 
+const pendingThinkingId = ref<number | null>(null)
+const pendingFileNames = ref<string[]>([])
+const pendingDocuments = ref<MessageDocument[]>([])
+const pendingFirstFile = ref<File | null>(null)
+
+function handleBackendResponse(response: MessageResponse) {
+  const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat || pendingThinkingId.value === null) return
+
+  const thinkingIndex = selectedChat.messages.findIndex(
+    msg => msg.id === pendingThinkingId.value
+  )
+
+  if (thinkingIndex !== -1) {
+    const assistantMessage: Message = {
+      id: nextMessageId++,
+      role: 'assistant',
+      text: '',
+      fileNames: pendingFileNames.value.length ? [...pendingFileNames.value] : undefined,
+      documents: pendingDocuments.value.length ? [...pendingDocuments.value] : undefined,
+      docReference: pendingFirstFile.value ? `Pg 1: ${pendingFirstFile.value.name}` : undefined
+    }
+
+    maybeAttachComparisonPrompt(assistantMessage)
+    selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
+
+    typeAssistantMessage(response.message, (typed) => {
+      const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
+      if (!liveChat) return
+      const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
+      if (!liveMessage) return
+      liveMessage.text = typed
+    })
+  }
+
+  pendingThinkingId.value = null
+  pendingFileNames.value = []
+  pendingDocuments.value = []
+  pendingFirstFile.value = null
+}
+
+const {
+  isConnected,
+  connect: wsConnect,
+  disconnect: wsDisconnect,
+  sendMessage: wsSendMessage
+} = useChatService(handleBackendResponse)
+
 const activeMode = ref<'chat' | 'doc'>('chat')
-const isConnected = ref(false)
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
@@ -101,17 +152,10 @@ const displayRole = computed(() => {
 const userInitial = computed(() => displayName.value.charAt(0).toUpperCase())
 const userPhoto = computed(() => (userStore as any).account?.idTokenClaims?.picture || '')
 
-const chats = ref<ChatItem[]>([
-  {
-    id: 1,
-    name: 'New Chat',
-    messages: [],
-    selectedDocumentId: null
-  }
-])
+const chats = ref<ChatItem[]>([])
 
-const selectedChatId = ref(1)
-let nextChatId = 2
+const selectedChatId = ref<number | null>(null)
+let nextChatId = 1
 let nextMessageId = 1
 
 const currentChat = computed(() => {
@@ -248,9 +292,37 @@ function toggleMenu(chatId: number) {
   openMenuChatId.value = openMenuChatId.value === chatId ? null : chatId
 }
 
-function selectChatById(chatId: number) {
+async function selectChatById(chatId: number) {
   selectedChatId.value = chatId
   openMenuChatId.value = null
+
+  const chat = chats.value.find(c => c.id === chatId)
+  if (!chat || chat.messages.length > 0) return
+
+  const session = await chatSessionService.getSessionById(chat.sessionId)
+  if (!session || !session.chatHistory) return
+
+  try {
+    const history: ChatHistoryEntry[] =
+      typeof session.chatHistory === 'string'
+        ? JSON.parse(session.chatHistory)
+        : session.chatHistory
+
+    for (const entry of history) {
+      chat.messages.push({
+        id: nextMessageId++,
+        role: 'user',
+        text: entry.question
+      })
+      chat.messages.push({
+        id: nextMessageId++,
+        role: 'assistant',
+        text: entry.answer
+      })
+    }
+  } catch {
+    console.error('Failed to parse chat history')
+  }
 }
 
 function renameChat(chatId: number) {
@@ -261,28 +333,32 @@ function renameChat(chatId: number) {
 
   if (newName && newName.trim()) {
     chat.name = newName.trim()
+    const userEmail = userStore.account?.username || 'anonymous'
+    chatSessionService.updateSession(chat.sessionId, {
+      chatName: chat.name,
+      userName: userEmail,
+      createdBy: userEmail
+    })
   }
 
   openMenuChatId.value = null
 }
 
-function deleteChat(chatId: number) {
+async function deleteChat(chatId: number) {
+  const chat = chats.value.find(c => c.id === chatId)
+  if (chat) {
+    chatSessionService.deleteSession(chat.sessionId)
+  }
+
   if (chats.value.length === 1) {
-    chats.value[0] = {
-      id: chats.value[0].id,
-      name: 'New Chat',
-      messages: [],
-      selectedDocumentId: null
-    }
-    selectedChatId.value = chats.value[0].id
+    await startNewChat()
+    const oldIndex = chats.value.findIndex(c => c.id === chatId)
+    if (oldIndex !== -1) chats.value.splice(oldIndex, 1)
     openMenuChatId.value = null
-    inputValue.value = ''
-    attachedFiles.value = []
-    clearPreviewFile()
     return
   }
 
-  const chatIndex = chats.value.findIndex(chat => chat.id === chatId)
+  const chatIndex = chats.value.findIndex(c => c.id === chatId)
   if (chatIndex === -1) return
 
   chats.value.splice(chatIndex, 1)
@@ -297,10 +373,19 @@ function deleteChat(chatId: number) {
   openMenuChatId.value = null
 }
 
-function startNewChat() {
+async function startNewChat() {
+  const userEmail = userStore.account?.username || 'anonymous'
+  const session = await chatSessionService.createSession({
+    chatName: 'New Chat',
+    userName: userEmail,
+    createdBy: userEmail,
+    status: 'active'
+  })
+
   const newChat: ChatItem = {
     id: nextChatId++,
-    name: 'New Chat',
+    sessionId: session?.id || crypto.randomUUID(),
+    name: session?.chatName || 'New Chat',
     messages: [],
     selectedDocumentId: null
   }
@@ -589,42 +674,17 @@ function sendMessage() {
 
   attachedFiles.value = []
 
-  window.setTimeout(() => {
-    const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
-    if (!selectedChat) return
+  pendingThinkingId.value = thinkingMessageId
+  pendingFileNames.value = fileNames
+  pendingDocuments.value = messageDocuments
+  pendingFirstFile.value = firstAttachedFile
 
-    const thinkingIndex = selectedChat.messages.findIndex(
-      msg => msg.id === thinkingMessageId
-    )
-
-    if (thinkingIndex !== -1) {
-      const assistantMessage: Message = {
-        id: nextMessageId++,
-        role: 'assistant',
-        text: '',
-        fileNames: fileNames.length ? [...fileNames] : undefined,
-        documents: messageDocuments,
-        docReference: firstAttachedFile ? `Pg 1: ${firstAttachedFile.name}` : undefined
-      }
-
-      maybeAttachComparisonPrompt(assistantMessage)
-
-      selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
-
-      typeAssistantMessage(
-        'I understand. This is a sample response area where the chatbot answer will appear.',
-        (typed) => {
-          const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
-          if (!liveChat) return
-
-          const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
-          if (!liveMessage) return
-
-          liveMessage.text = typed
-        }
-      )
-    }
-  }, 1800)
+  const userEmail = userStore.account?.username || 'anonymous'
+  wsSendMessage({
+    sessionId: currentChat.value?.sessionId || crypto.randomUUID(),
+    sender: userEmail,
+    message: text
+  })
 }
 
 async function handleLogout() {
@@ -650,16 +710,33 @@ watch(activeMode, (mode) => {
   }
 })
 
-onMounted(() => {
-  window.setTimeout(() => {
-    isConnected.value = true
-  }, 1800)
+onMounted(async () => {
+  await authService.initialize()
+  await authService.exchangeToken()
+  wsConnect()
+
+  const userEmail = userStore.account?.username || 'anonymous'
+  const sessions = await chatSessionService.getSessionsByUser(userEmail)
+
+  if (sessions.length > 0) {
+    chats.value = sessions.map(s => ({
+      id: nextChatId++,
+      sessionId: s.id,
+      name: s.chatName,
+      messages: [],
+      selectedDocumentId: null
+    }))
+    selectedChatId.value = chats.value[0].id
+  } else {
+    await startNewChat()
+  }
 
   window.addEventListener('click', closeMenuOutside)
   typeLoop()
 })
 
 onBeforeUnmount(() => {
+  wsDisconnect()
   window.removeEventListener('click', closeMenuOutside)
 
   if (typeTimeout !== null) {

@@ -1,0 +1,29 @@
+location: australiaeast
+resourceGroup: ai-platform
+type: Microsoft.App/containerApps
+name: user-interface
+properties:
+  environmentId: /subscriptions/53f34d3b-bdc7-4e68-89c4-0e4f1947eb31/resourceGroups/ai-platform/providers/Microsoft.App/managedEnvironments/managedEnvironment-aiplatform-8573
+  configuration:
+    registries:
+      - server: oconnoraiplatform.azurecr.io
+        username: oconnoraiplatform
+        passwordSecretRef: acr-password
+    secrets:
+      - name: acr-password
+        value: PLACEHOLDER_ACR
+    ingress:
+      external: true
+      targetPort: 80
+      transport: http
+      allowInsecure: false
+  template:
+    containers:
+      - name: user-interface
+        image: oconnoraiplatform.azurecr.io/user-interface:latest
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3

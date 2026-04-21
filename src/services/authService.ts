@@ -3,9 +3,9 @@ import type { Configuration, RedirectRequest, AuthenticationResult, AccountInfo 
 
 const msalConfig: Configuration = {
   auth: {
-    clientId: "6011c93e-17a3-4d85-b297-49422fc7fe97",
-    authority: "https://login.microsoftonline.com/dcd857fa-da1c-42e4-801b-702d52e946b1",
-    redirectUri: "http://localhost:5173",
+    clientId: import.meta.env.VITE_AZURE_CLIENT_ID,
+    authority: import.meta.env.VITE_AZURE_AUTHORITY,
+    redirectUri: import.meta.env.VITE_AZURE_REDIRECT_URI,
   },
   cache: {
     cacheLocation: "sessionStorage",
@@ -15,10 +15,10 @@ const msalConfig: Configuration = {
 export const msalInstance = new PublicClientApplication(msalConfig);
 
 export const loginRequest: RedirectRequest = {
-  scopes: ["api://6011c93e-17a3-4d85-b297-49422fc7fe97/access_as_user"]
+  scopes: [import.meta.env.VITE_AZURE_SCOPE]
 };
 
-const AUTH_API_BASE = 'http://localhost:8081';
+const AUTH_API_BASE = import.meta.env.VITE_AUTH_SERVICE_URL || 'http://localhost:8081';
 
 export interface BackendTokenResult {
   accessToken: string;
