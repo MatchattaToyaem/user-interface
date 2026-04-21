@@ -1,7 +1,7 @@
 location: australiaeast
 resourceGroup: ai-platform
 type: Microsoft.App/containerApps
-name: user-interface
+name: ui-interface-app
 properties:
   environmentId: /subscriptions/53f34d3b-bdc7-4e68-89c4-0e4f1947eb31/resourceGroups/ai-platform/providers/Microsoft.App/managedEnvironments/managedEnvironment-aiplatform-8573
   configuration:
@@ -19,7 +19,7 @@ properties:
       allowInsecure: false
   template:
     containers:
-      - name: user-interface
+      - name: ui-interface-app
         image: oconnoraiplatform.azurecr.io/user-interface:latest
         resources:
           cpu: 0.25
