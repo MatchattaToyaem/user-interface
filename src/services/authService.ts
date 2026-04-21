@@ -91,6 +91,12 @@ export const authService = {
   },
 
   async login() {
+    console.log("[login] MSAL config:", {
+      clientId: import.meta.env.VITE_AZURE_CLIENT_ID,
+      authority: import.meta.env.VITE_AZURE_AUTHORITY,
+      redirectUri: import.meta.env.VITE_AZURE_REDIRECT_URI,
+      scope: import.meta.env.VITE_AZURE_SCOPE,
+    });
     await this.initialize();
 
     try {
