@@ -30,14 +30,14 @@ definitions:
           - sed -i "s/PLACEHOLDER_ACR/$ACR_PASSWORD/g" user-interface.yaml
 
           - |
-            if az containerapp show --name user-interface --resource-group ai-platform 2>/dev/null; then
+            if az containerapp show --name ui-interface-app --resource-group ai-platform 2>/dev/null; then
               az containerapp update \
-                --name user-interface \
+                --name ui-interface-app \
                 --resource-group ai-platform \
                 --image oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT
             else
               az containerapp create \
-                --name user-interface \
+                --name ui-interface-app \
                 --resource-group ai-platform \
                 --yaml user-interface.yaml
             fi
