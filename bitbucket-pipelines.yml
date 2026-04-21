@@ -7,10 +7,26 @@ definitions:
         services:
           - docker
         script:
+          - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+          - az login --service-principal
+              --username $AZURE_CLIENT_ID
+              --password $AZURE_CLIENT_SECRET
+              --tenant $AZURE_TENANT_ID
+
+          # Fetch MSAL config from Key Vault
+          - VITE_AZURE_CLIENT_ID=$(az keyvault secret show --vault-name $AZURE_KEY_VAULT_NAME --name azure-client-id --query value -o tsv)
+          - VITE_AZURE_AUTHORITY=$(az keyvault secret show --vault-name $AZURE_KEY_VAULT_NAME --name azure-authority --query value -o tsv)
+          - VITE_AZURE_REDIRECT_URI=$(az keyvault secret show --vault-name $AZURE_KEY_VAULT_NAME --name azure-redirect-uri --query value -o tsv)
+          - VITE_AZURE_SCOPE=$(az keyvault secret show --vault-name $AZURE_KEY_VAULT_NAME --name azure-scope --query value -o tsv)
+
           - echo $ACR_PASSWORD | docker login oconnoraiplatform.azurecr.io
               --username $ACR_USERNAME
               --password-stdin
           - docker build
+              --build-arg VITE_AZURE_CLIENT_ID=$VITE_AZURE_CLIENT_ID
+              --build-arg VITE_AZURE_AUTHORITY=$VITE_AZURE_AUTHORITY
+              --build-arg VITE_AZURE_REDIRECT_URI=$VITE_AZURE_REDIRECT_URI
+              --build-arg VITE_AZURE_SCOPE=$VITE_AZURE_SCOPE
               -t oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT .
           - docker tag oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT
               oconnoraiplatform.azurecr.io/user-interface:latest
