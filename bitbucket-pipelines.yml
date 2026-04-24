@@ -45,12 +45,13 @@ definitions:
           # Inject ACR secret into yaml
           - sed -i "s/PLACEHOLDER_ACR/$ACR_PASSWORD/g" user-interface.yaml
 
+          - sed -i "s|oconnoraiplatform.azurecr.io/user-interface:latest|oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT|g" user-interface.yaml
           - |
             if az containerapp show --name ui-interface-app --resource-group ai-platform 2>/dev/null; then
               az containerapp update \
                 --name ui-interface-app \
                 --resource-group ai-platform \
-                --image oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT
+                --yaml user-interface.yaml
             else
               az containerapp create \
                 --name ui-interface-app \
