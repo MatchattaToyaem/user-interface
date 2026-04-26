@@ -1,4 +1,5 @@
 import { authService } from '@/services/authService'
+import type { SourceRef } from '@/models/messageResponse'
 
 const CHAT_API_BASE = import.meta.env.VITE_CHAT_SERVICE_URL || 'http://localhost:8082'
 
@@ -15,6 +16,7 @@ export interface ChatSessionResponse {
 export interface ChatHistoryEntry {
   question: string
   answer: string
+  sources?: SourceRef[]
   document_reference_id: string
   response_time: string
   response_date: string

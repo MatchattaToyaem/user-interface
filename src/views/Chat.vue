@@ -317,10 +317,18 @@ async function selectChatById(chatId: number) {
         role: 'user',
         text: entry.question
       })
+
+      const sourceDocuments: MessageDocument[] = (entry.sources || []).map((s, index) => ({
+        id: `source-${s.chunk_id || index}-${Date.now()}`,
+        name: s.file,
+        documentPath: s.document_path
+      }))
+
       chat.messages.push({
         id: nextMessageId++,
         role: 'assistant',
-        text: entry.answer
+        text: entry.answer,
+        documents: sourceDocuments.length ? sourceDocuments : undefined
       })
     }
   } catch {
