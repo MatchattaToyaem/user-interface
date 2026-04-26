@@ -41,7 +41,7 @@
           </div>
         </template>
 
-        <template v-else-if="!previewFile && !previewFileUrl">
+        <template v-else-if="!previewFile && !previewFileUrl && !isDocLoading">
           <div class="doc-empty-state">
             <div class="doc-empty-card">
               <div class="doc-empty-icon-wrap">

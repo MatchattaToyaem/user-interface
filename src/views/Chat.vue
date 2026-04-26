@@ -661,10 +661,16 @@ async function openDocumentFromMessage(document: MessageDocument) {
     chat.selectedDocumentId = document.id
   }
 
-  triggerDocLoading()
-  await loadDocumentPreview(document)
+  docLoadToken.value = Date.now()
+  isDocLoading.value = true
   activeMode.value = 'doc'
   isDocViewerOpen.value = true
+
+  try {
+    await loadDocumentPreview(document)
+  } finally {
+    isDocLoading.value = false
+  }
 }
 
 function sendMessage() {
@@ -700,7 +706,7 @@ function sendMessage() {
 
   if (firstMessageDocument && currentChat.value) {
     currentChat.value.selectedDocumentId = firstMessageDocument.id
-    setPreviewFile(firstMessageDocument.file)
+    if (firstMessageDocument.file) setPreviewFile(firstMessageDocument.file)
   }
 
   attachedFiles.value = []
