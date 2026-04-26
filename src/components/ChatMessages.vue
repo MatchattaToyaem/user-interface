@@ -161,7 +161,8 @@
 type MessageDocument = {
   id: string
   name: string
-  file: File
+  documentPath?: string
+  file?: File
 }
 
 type MessageRole = 'user' | 'assistant' | 'thinking' | 'comparison_result'

@@ -18,7 +18,8 @@ import attachLogo from '@/assets/attach-logo.png'
 type MessageDocument = {
   id: string
   name: string
-  file: File
+  documentPath?: string
+  file?: File
 }
 
 type MessageRole = 'user' | 'assistant' | 'thinking' | 'comparison_result'
@@ -63,12 +64,18 @@ function handleBackendResponse(response: MessageResponse) {
   )
 
   if (thinkingIndex !== -1) {
+    const sourceDocuments: MessageDocument[] = (response.sources || []).map((s, index) => ({
+      id: `source-${s.chunk_id || index}-${Date.now()}`,
+      name: s.file,
+      documentPath: s.document_path
+    }))
+
     const assistantMessage: Message = {
       id: nextMessageId++,
       role: 'assistant',
       text: '',
       fileNames: pendingFileNames.value.length ? [...pendingFileNames.value] : undefined,
-      documents: pendingDocuments.value.length ? [...pendingDocuments.value] : undefined,
+      documents: sourceDocuments.length ? sourceDocuments : undefined,
       docReference: pendingFirstFile.value ? `Pg 1: ${pendingFirstFile.value.name}` : undefined
     }
 
@@ -111,6 +118,7 @@ const openMenuChatId = ref<number | null>(null)
 const animatedText = ref('')
 const attachedFiles = ref<File[]>([])
 const previewFile = ref<File | null>(null)
+const previewFileName = ref<string>('')
 const previewFileUrl = ref('')
 const assistantReplyCount = ref(0)
 const typingSpeed = 18
@@ -127,6 +135,8 @@ const phrases = [
   'Upload a manual for reference',
   'Troubleshoot a problem'
 ]
+
+const documentServiceUrl = import.meta.env.VITE_DOCUMENT_SERVICE_URL || 'http://localhost:8083'
 
 let phraseIndex = 0
 let charIndex = 0
@@ -184,34 +194,27 @@ const supportedPreviewText = computed(() => {
 })
 
 const currentPreviewFileName = computed(() => {
-  return previewFile.value?.name || 'No document selected'
+  return previewFile.value?.name || previewFileName.value || 'No document selected'
 })
 
 const isPdfPreview = computed(() => {
-  return !!previewFile.value && previewFile.value.name.toLowerCase().endsWith('.pdf')
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return !!name && name.endsWith('.pdf')
 })
 
 const isImagePreview = computed(() => {
-  if (!previewFile.value) return false
-  const lower = previewFile.value.name.toLowerCase()
-  return (
-    lower.endsWith('.png') ||
-    lower.endsWith('.jpg') ||
-    lower.endsWith('.jpeg') ||
-    lower.endsWith('.webp')
-  )
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')
 })
 
 const isWordPreview = computed(() => {
-  if (!previewFile.value) return false
-  const lower = previewFile.value.name.toLowerCase()
-  return lower.endsWith('.doc') || lower.endsWith('.docx')
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.doc') || name.endsWith('.docx')
 })
 
 const isExcelPreview = computed(() => {
-  if (!previewFile.value) return false
-  const lower = previewFile.value.name.toLowerCase()
-  return lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.endsWith('.csv')
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.xls') || name.endsWith('.xlsx') || name.endsWith('.csv')
 })
 
 const officeViewerUrl = computed(() => {
@@ -505,6 +508,7 @@ function clearPreviewFile() {
   }
 
   previewFile.value = null
+  previewFileName.value = ''
   previewFileUrl.value = ''
 }
 
@@ -514,6 +518,33 @@ function createMessageDocuments(files: File[]): MessageDocument[] {
     name: file.name,
     file
   }))
+}
+
+async function fetchDocumentBlob(documentPath: string): Promise<string> {
+  const token = await authService.getToken()
+  const response = await fetch(
+    `${documentServiceUrl}/documents/file?path=${encodeURIComponent(documentPath)}`,
+    token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  )
+  if (!response.ok) throw new Error(`Failed to fetch document: ${response.status}`)
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
+}
+
+async function loadDocumentPreview(document: MessageDocument) {
+  if (document.file) {
+    setPreviewFile(document.file)
+  } else if (document.documentPath) {
+    if (previewFileUrl.value) URL.revokeObjectURL(previewFileUrl.value)
+    previewFile.value = null
+    previewFileName.value = document.name
+    previewFileUrl.value = ''
+    try {
+      previewFileUrl.value = await fetchDocumentBlob(document.documentPath)
+    } catch (e) {
+      console.error('Failed to load document from document-service:', e)
+    }
+  }
 }
 
 function findDocumentByIdInChat(chat: ChatItem | null, documentId: string | null | undefined) {
@@ -551,7 +582,7 @@ function syncPreviewFileFromChat(chat: ChatItem | null) {
 
   if (selectedDocument) {
     triggerDocLoading(320)
-    setPreviewFile(selectedDocument.file)
+    loadDocumentPreview(selectedDocument)
     return
   }
 
@@ -560,7 +591,7 @@ function syncPreviewFileFromChat(chat: ChatItem | null) {
   if (firstDocument) {
     chat.selectedDocumentId = firstDocument.id
     triggerDocLoading(320)
-    setPreviewFile(firstDocument.file)
+    loadDocumentPreview(firstDocument)
     return
   }
 
@@ -624,14 +655,14 @@ function isDocumentSelected(documentId: string) {
   return chat.selectedDocumentId === documentId
 }
 
-function openDocumentFromMessage(document: MessageDocument) {
+async function openDocumentFromMessage(document: MessageDocument) {
   const chat = currentChat.value
   if (chat) {
     chat.selectedDocumentId = document.id
   }
 
   triggerDocLoading()
-  setPreviewFile(document.file)
+  await loadDocumentPreview(document)
   activeMode.value = 'doc'
   isDocViewerOpen.value = true
 }
