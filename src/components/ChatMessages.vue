@@ -71,21 +71,14 @@
             </div>
 
             <div v-if="message.text" class="formatted-answer">
-              <template
+              <div
                 v-if="
                   message.role === 'assistant' ||
                   message.role === 'comparison_result'
                 "
-              >
-                <ul>
-                  <li
-                    v-for="point in formatBulletPoints(message.text)"
-                    :key="point"
-                  >
-                    {{ point }}
-                  </li>
-                </ul>
-              </template>
+                class="markdown-body"
+                v-html="renderMarkdown(message.text)"
+              ></div>
 
               <template v-else>
                 {{ message.text }}
@@ -119,6 +112,16 @@
 </template>
 
 <script setup lang="ts">
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+marked.setOptions({ breaks: true })
+
+function renderMarkdown(text: string): string {
+  const raw = marked.parse(text) as string
+  return DOMPurify.sanitize(raw)
+}
+
 type MessageDocument = {
   id: string
   name: string
@@ -142,13 +145,6 @@ type ChatItem = {
   name: string
   messages: Message[]
   selectedDocumentId?: string | null
-}
-
-function formatBulletPoints(text: string) {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map(point => point.trim())
-    .filter(point => point.length > 0)
 }
 
 defineProps<{
@@ -368,18 +364,132 @@ defineEmits<{
   animation: assistantBubbleIn 0.34s ease;
 }
 
-.formatted-answer ul {
-  margin: 0;
-  padding-left: 20px;
+.markdown-body {
+  line-height: 1.7;
+  color: #dfe6f5;
+  word-break: break-word;
 }
 
-.formatted-answer li {
-  margin-bottom: 8px;
+.markdown-body :deep(p) {
+  margin: 0 0 10px;
+}
+
+.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4),
+.markdown-body :deep(h5),
+.markdown-body :deep(h6) {
+  margin: 16px 0 8px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.3;
+}
+
+.markdown-body :deep(h1) { font-size: 1.4em; }
+.markdown-body :deep(h2) { font-size: 1.25em; }
+.markdown-body :deep(h3) { font-size: 1.1em; }
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 6px 0 10px;
+  padding-left: 22px;
+}
+
+.markdown-body :deep(li) {
+  margin-bottom: 4px;
   line-height: 1.7;
 }
 
-.formatted-answer li:last-child {
+.markdown-body :deep(li:last-child) {
   margin-bottom: 0;
+}
+
+.markdown-body :deep(code) {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #93c5fd;
+}
+
+.markdown-body :deep(pre) {
+  margin: 10px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(5, 8, 18, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow-x: auto;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: #c9d1e0;
+  font-size: 13px;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 10px 0;
+  padding: 8px 14px;
+  border-left: 3px solid rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: 0 8px 8px 0;
+  color: #9eb4d4;
+}
+
+.markdown-body :deep(blockquote p) {
+  margin: 0;
+}
+
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: rgba(255, 255, 255, 0.05);
+  color: #c8d6f0;
+  font-weight: 600;
+}
+
+.markdown-body :deep(a) {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown-body :deep(a:hover) {
+  color: #93c5fd;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 14px 0;
+}
+
+.markdown-body :deep(strong) {
+  color: #f0f4ff;
+  font-weight: 700;
+}
+
+.markdown-body :deep(em) {
+  color: #c8d6f0;
 }
 
 .comparisonResultBubble {
