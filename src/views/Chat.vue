@@ -335,7 +335,7 @@ function renameChat(chatId: number) {
 
   if (newName && newName.trim()) {
     chat.name = newName.trim()
-    const userEmail = userStore.account?.username || 'anonymous'
+    const userEmail = authService.getCurrentUser()?.email || userStore.account?.username || localStorage.getItem('userEmail') || 'anonymous'
     chatSessionService.updateSession(chat.sessionId, {
       chatName: chat.name,
       userName: userEmail,
@@ -374,7 +374,7 @@ async function deleteChat(chatId: number) {
 }
 
 async function startNewChat() {
-  const userEmail = userStore.account?.username || 'anonymous'
+  const userEmail = authService.getCurrentUser()?.email || userStore.account?.username || localStorage.getItem('userEmail') || 'anonymous'
   const session = await chatSessionService.createSession({
     chatName: 'New Chat',
     userName: userEmail,
@@ -642,41 +642,12 @@ function sendMessage() {
   pendingDocuments.value = messageDocuments
   pendingFirstFile.value = firstAttachedFile
 
-  const userEmail = userStore.account?.username || 'anonymous'
+  const userEmail = authService.getCurrentUser()?.email || userStore.account?.username || localStorage.getItem('userEmail') || 'anonymous'
   wsSendMessage({
     sessionId: currentChat.value?.sessionId || crypto.randomUUID(),
     sender: userEmail,
     message: text
   })
-  window.setTimeout(() => {
-    const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
-    if (!selectedChat) return
-
-    const thinkingIndex = selectedChat.messages.findIndex(msg => msg.id === thinkingMessageId)
-
-    if (thinkingIndex !== -1) {
-      const assistantMessage: Message = {
-        id: nextMessageId++,
-        role: 'assistant',
-        text: ''
-      }
-
-      selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
-
-      typeAssistantMessage(
-        'I understand. This is a sample response area where the chatbot answer will appear.',
-        typed => {
-          const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
-          if (!liveChat) return
-
-          const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
-          if (!liveMessage) return
-
-          liveMessage.text = typed
-        }
-      )
-    }
-  }, 1800)
 }
 
 async function handleLogout() {
@@ -686,7 +657,7 @@ async function handleLogout() {
   router.push('/login')
 }
 
-onMounted(() => {
+onMounted(async () => {
   wsConnect()
 
   window.setTimeout(() => {
@@ -704,6 +675,36 @@ onMounted(() => {
 
   window.addEventListener('click', closeMenuOutside)
   typeLoop()
+
+  const userEmail =
+    authService.getCurrentUser()?.email ||
+    userStore.account?.username ||
+    localStorage.getItem('userEmail') ||
+    'anonymous'
+
+  try {
+    const sessions = await chatSessionService.getSessionsByUser(userEmail)
+    if (sessions && sessions.length > 0) {
+      const sorted = [...sessions].sort(
+        (a, b) => new Date(b.lastAccess).getTime() - new Date(a.lastAccess).getTime()
+      )
+      for (const session of sorted) {
+        chats.value.push({
+          id: nextChatId++,
+          sessionId: session.id,
+          name: session.chatName || 'Chat',
+          messages: [],
+          selectedDocumentId: null
+        })
+      }
+      selectedChatId.value = chats.value[0].id
+      await selectChatById(chats.value[0].id)
+    } else {
+      await startNewChat()
+    }
+  } catch {
+    await startNewChat()
+  }
 })
 
 onBeforeUnmount(() => {
