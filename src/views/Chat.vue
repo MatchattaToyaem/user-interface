@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
-import DocViewer from '@/components/DocViewer.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
 import aiLogo from '@/assets/ai-logo.png'
 import chatLogo from '@/assets/chat-logo.png'
-import docLogo from '@/assets/doc-logo.png'
-import attachLogo from '@/assets/attach-logo.png'
 
 type MessageDocument = {
   id: string
@@ -27,12 +24,6 @@ type Message = {
   fileNames?: string[]
   docReference?: string
   documents?: MessageDocument[]
-  compared?: boolean
-  comparisonOptions?: {
-    left: string
-    right: string
-  }
-  chosenOption?: 'left' | 'right' | null
 }
 
 type ChatItem = {
@@ -45,37 +36,19 @@ type ChatItem = {
 const router = useRouter()
 const userStore = useUserStore()
 
-const activeMode = ref<'chat' | 'doc'>('chat')
+const activeMode = ref<'chat'>('chat')
+const showIntro = ref(true)
 const isConnected = ref(false)
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
-const isDocViewerOpen = ref(false)
-const isDocLoading = ref(false)
-const docLoadToken = ref(0)
 const inputValue = ref('')
 const searchQuery = ref('')
-const docSearchQuery = ref('')
 const openMenuChatId = ref<number | null>(null)
 const animatedText = ref('')
-const attachedFiles = ref<File[]>([])
-const previewFile = ref<File | null>(null)
-const previewFileUrl = ref('')
-const assistantReplyCount = ref(0)
 const typingSpeed = 18
 
-const comparisonPromptProbability = 0.28
-const comparisonLabels = [
-  { left: 'Option 1', right: 'Option 2' },
-  { left: 'Response 1', right: 'Response 2' },
-  { left: 'Version 1', right: 'Version 2' }
-]
-
-const phrases = [
-  'Ask about specific projects',
-  'Upload a manual for reference',
-  'Troubleshoot a problem'
-]
+const phrases = ['Ask about specific projects', 'Troubleshoot a problem', 'Ask a question']
 
 let phraseIndex = 0
 let charIndex = 0
@@ -133,46 +106,6 @@ const showWelcome = computed(() => {
   return !!currentChat.value &&
     currentChat.value.messages.length === 0 &&
     inputValue.value.trim() === ''
-})
-
-const supportedPreviewText = computed(() => {
-  return 'PDF, Word and Excel previews are supported'
-})
-
-const currentPreviewFileName = computed(() => {
-  return previewFile.value?.name || 'No document selected'
-})
-
-const isPdfPreview = computed(() => {
-  return !!previewFile.value && previewFile.value.name.toLowerCase().endsWith('.pdf')
-})
-
-const isImagePreview = computed(() => {
-  if (!previewFile.value) return false
-  const lower = previewFile.value.name.toLowerCase()
-  return (
-    lower.endsWith('.png') ||
-    lower.endsWith('.jpg') ||
-    lower.endsWith('.jpeg') ||
-    lower.endsWith('.webp')
-  )
-})
-
-const isWordPreview = computed(() => {
-  if (!previewFile.value) return false
-  const lower = previewFile.value.name.toLowerCase()
-  return lower.endsWith('.doc') || lower.endsWith('.docx')
-})
-
-const isExcelPreview = computed(() => {
-  if (!previewFile.value) return false
-  const lower = previewFile.value.name.toLowerCase()
-  return lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.endsWith('.csv')
-})
-
-const officeViewerUrl = computed(() => {
-  if (!previewFileUrl.value) return ''
-  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewFileUrl.value)}`
 })
 
 function typeLoop() {
@@ -239,9 +172,7 @@ function closeMenuOutside() {
 
 function handleSearchEnter() {
   const firstMatch = filteredChats.value[0]
-  if (firstMatch) {
-    selectedChatId.value = firstMatch.id
-  }
+  if (firstMatch) selectedChatId.value = firstMatch.id
 }
 
 function toggleMenu(chatId: number) {
@@ -274,11 +205,10 @@ function deleteChat(chatId: number) {
       messages: [],
       selectedDocumentId: null
     }
+
     selectedChatId.value = chats.value[0].id
     openMenuChatId.value = null
     inputValue.value = ''
-    attachedFiles.value = []
-    clearPreviewFile()
     return
   }
 
@@ -290,8 +220,6 @@ function deleteChat(chatId: number) {
   if (selectedChatId.value === chatId) {
     selectedChatId.value = chats.value[0].id
     inputValue.value = ''
-    attachedFiles.value = []
-    syncPreviewFileFromChat(chats.value[0] || null)
   }
 
   openMenuChatId.value = null
@@ -309,90 +237,11 @@ function startNewChat() {
   selectedChatId.value = newChat.id
   inputValue.value = ''
   searchQuery.value = ''
-  attachedFiles.value = []
   openMenuChatId.value = null
-  assistantReplyCount.value = 0
-  clearPreviewFile()
 }
 
 function setChatMode() {
   activeMode.value = 'chat'
-  isDocViewerOpen.value = false
-}
-
-function triggerDocLoading(duration = 420) {
-  const token = Date.now()
-  docLoadToken.value = token
-  isDocLoading.value = true
-
-  window.setTimeout(() => {
-    if (docLoadToken.value === token) {
-      isDocLoading.value = false
-    }
-  }, duration)
-}
-
-function openDocViewerPanel() {
-  activeMode.value = 'doc'
-  syncPreviewFileFromCurrentChat()
-  triggerDocLoading()
-  isDocViewerOpen.value = true
-}
-
-function closeDocViewerPanel() {
-  isDocViewerOpen.value = false
-  activeMode.value = 'chat'
-}
-
-function handleFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  const files = target.files
-
-  if (!files || files.length === 0) return
-
-  const newFiles = Array.from(files)
-
-  for (const file of newFiles) {
-    const exists = attachedFiles.value.some(
-      existing =>
-        existing.name === file.name &&
-        existing.lastModified === file.lastModified &&
-        existing.size === file.size
-    )
-
-    if (!exists) {
-      attachedFiles.value.push(file)
-    }
-  }
-
-  if (!previewFile.value && attachedFiles.value.length > 0) {
-    setPreviewFile(attachedFiles.value[0])
-  }
-}
-
-function removeAttachedFile(fileToRemove: File) {
-  const wasPreview =
-    previewFile.value &&
-    previewFile.value.name === fileToRemove.name &&
-    previewFile.value.lastModified === fileToRemove.lastModified &&
-    previewFile.value.size === fileToRemove.size
-
-  attachedFiles.value = attachedFiles.value.filter(
-    file =>
-      !(
-        file.name === fileToRemove.name &&
-        file.lastModified === fileToRemove.lastModified &&
-        file.size === fileToRemove.size
-      )
-  )
-
-  if (wasPreview) {
-    if (attachedFiles.value.length > 0) {
-      setPreviewFile(attachedFiles.value[0])
-    } else {
-      clearPreviewFile()
-    }
-  }
 }
 
 function getFileBadge(fileName: string) {
@@ -402,172 +251,32 @@ function getFileBadge(fileName: string) {
   if (['doc', 'docx'].includes(extension)) return 'DOC'
   if (['xls', 'xlsx', 'csv'].includes(extension)) return 'XLS'
   if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 'IMG'
+
   return 'FILE'
 }
 
-function setPreviewFile(file: File) {
-  if (previewFileUrl.value) {
-    URL.revokeObjectURL(previewFileUrl.value)
-  }
-
-  previewFile.value = file
-  previewFileUrl.value = URL.createObjectURL(file)
+function isDocumentSelected() {
+  return false
 }
 
-function clearPreviewFile() {
-  if (previewFileUrl.value) {
-    URL.revokeObjectURL(previewFileUrl.value)
-  }
-
-  previewFile.value = null
-  previewFileUrl.value = ''
-}
-
-function createMessageDocuments(files: File[]): MessageDocument[] {
-  return files.map((file, index) => ({
-    id: `${file.name}-${file.lastModified}-${file.size}-${index}-${Date.now()}`,
-    name: file.name,
-    file
-  }))
-}
-
-function findDocumentByIdInChat(chat: ChatItem | null, documentId: string | null | undefined) {
-  if (!chat || !documentId) return null
-
-  for (const message of chat.messages) {
-    if (!message.documents || !message.documents.length) continue
-
-    const found = message.documents.find(document => document.id === documentId)
-    if (found) return found
-  }
-
-  return null
-}
-
-function findFirstDocumentInChat(chat: ChatItem | null) {
-  if (!chat) return null
-
-  for (const message of chat.messages) {
-    if (message.documents && message.documents.length) {
-      return message.documents[0]
-    }
-  }
-
-  return null
-}
-
-function syncPreviewFileFromChat(chat: ChatItem | null) {
-  if (!chat) {
-    clearPreviewFile()
-    return
-  }
-
-  const selectedDocument = findDocumentByIdInChat(chat, chat.selectedDocumentId)
-
-  if (selectedDocument) {
-    triggerDocLoading(320)
-    setPreviewFile(selectedDocument.file)
-    return
-  }
-
-  const firstDocument = findFirstDocumentInChat(chat)
-
-  if (firstDocument) {
-    chat.selectedDocumentId = firstDocument.id
-    triggerDocLoading(320)
-    setPreviewFile(firstDocument.file)
-    return
-  }
-
-  clearPreviewFile()
-}
-
-function syncPreviewFileFromCurrentChat() {
-  syncPreviewFileFromChat(currentChat.value)
-}
-
-function maybeAttachComparisonPrompt(targetMessage: Message) {
-  assistantReplyCount.value++
-
-  if (assistantReplyCount.value <= 1) return
-
-  const shouldShow = Math.random() < comparisonPromptProbability
-  if (!shouldShow) return
-
-  const randomLabels =
-    comparisonLabels[Math.floor(Math.random() * comparisonLabels.length)]
-
-  targetMessage.compared = true
-  targetMessage.comparisonOptions = {
-    left: randomLabels.left,
-    right: randomLabels.right
-  }
-  targetMessage.chosenOption = null
-}
-
-function chooseComparisonOption(messageId: number, option: 'left' | 'right') {
-  const chat = currentChat.value
-  if (!chat) return
-
-  const targetIndex = chat.messages.findIndex(msg => msg.id === messageId)
-  if (targetIndex === -1) return
-
-  const target = chat.messages[targetIndex]
-  if (!target || !target.compared || !target.comparisonOptions) return
-
-  target.chosenOption = option
-
-  const selectedTitle =
-    option === 'left'
-      ? target.comparisonOptions.left
-      : target.comparisonOptions.right
-
-  window.setTimeout(() => {
-    chat.messages.splice(targetIndex + 1, 0, {
-      id: nextMessageId++,
-      role: 'comparison_result',
-      text: `You selected ${selectedTitle}. I understand. This is a sample response area where the chatbot answer will appear.`,
-      documents: target.documents,
-      fileNames: target.fileNames
-    })
-  }, 260)
-}
-
-function isDocumentSelected(documentId: string) {
-  const chat = currentChat.value
-  if (!chat) return false
-  return chat.selectedDocumentId === documentId
-}
-
-function openDocumentFromMessage(document: MessageDocument) {
-  const chat = currentChat.value
-  if (chat) {
-    chat.selectedDocumentId = document.id
-  }
-
-  triggerDocLoading()
-  setPreviewFile(document.file)
-  activeMode.value = 'doc'
-  isDocViewerOpen.value = true
+function openDocumentFromMessage() {
+  return
 }
 
 function sendMessage() {
   const text = inputValue.value.trim()
 
-  if (!text && !attachedFiles.value.length) return
-  if (!currentChat.value) return
-
-  const userFiles = [...attachedFiles.value]
-  const fileNames = userFiles.map(file => file.name)
-  const messageDocuments = createMessageDocuments(userFiles)
+  if (!text || !currentChat.value) return
 
   currentChat.value.messages.push({
     id: nextMessageId++,
     role: 'user',
-    text,
-    fileNames,
-    documents: messageDocuments
+    text
   })
+
+  if (currentChat.value.name === 'New Chat') {
+    currentChat.value.name = text.length > 28 ? text.slice(0, 28) + '...' : text
+  }
 
   inputValue.value = ''
 
@@ -579,41 +288,24 @@ function sendMessage() {
     text: ''
   })
 
-  const firstAttachedFile = userFiles.length ? userFiles[0] : null
-  const firstMessageDocument = messageDocuments.length ? messageDocuments[0] : null
-
-  if (firstMessageDocument && currentChat.value) {
-    currentChat.value.selectedDocumentId = firstMessageDocument.id
-    setPreviewFile(firstMessageDocument.file)
-  }
-
-  attachedFiles.value = []
-
   window.setTimeout(() => {
     const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
     if (!selectedChat) return
 
-    const thinkingIndex = selectedChat.messages.findIndex(
-      msg => msg.id === thinkingMessageId
-    )
+    const thinkingIndex = selectedChat.messages.findIndex(msg => msg.id === thinkingMessageId)
 
     if (thinkingIndex !== -1) {
       const assistantMessage: Message = {
         id: nextMessageId++,
         role: 'assistant',
-        text: '',
-        fileNames: fileNames.length ? [...fileNames] : undefined,
-        documents: messageDocuments,
-        docReference: firstAttachedFile ? `Pg 1: ${firstAttachedFile.name}` : undefined
+        text: ''
       }
-
-      maybeAttachComparisonPrompt(assistantMessage)
 
       selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
 
       typeAssistantMessage(
         'I understand. This is a sample response area where the chatbot answer will appear.',
-        (typed) => {
+        typed => {
           const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
           if (!liveChat) return
 
@@ -634,26 +326,19 @@ async function handleLogout() {
   router.push('/login')
 }
 
-watch(selectedChatId, () => {
-  syncPreviewFileFromCurrentChat()
-})
-
-watch(isDocViewerOpen, (isOpen) => {
-  if (isOpen) {
-    syncPreviewFileFromCurrentChat()
-  }
-})
-
-watch(activeMode, (mode) => {
-  if (mode === 'doc') {
-    syncPreviewFileFromCurrentChat()
-  }
-})
-
 onMounted(() => {
   window.setTimeout(() => {
     isConnected.value = true
   }, 1800)
+
+  window.setTimeout(() => {
+    showIntro.value = false
+  }, 3200)
+
+  window.setTimeout(() => {
+    const nav = navigator as Navigator & { vibrate?: (pattern: number | number[]) => boolean }
+    nav.vibrate?.([30, 40, 30])
+  }, 550)
 
   window.addEventListener('click', closeMenuOutside)
   typeLoop()
@@ -668,18 +353,33 @@ onBeforeUnmount(() => {
 
   activeTypingIntervals.forEach(interval => clearInterval(interval))
   activeTypingIntervals.clear()
-
-  if (previewFileUrl.value) {
-    URL.revokeObjectURL(previewFileUrl.value)
-  }
 })
 </script>
 
 <template>
   <div class="chat-page">
+    <div v-if="showIntro" class="intro-overlay">
+      <div class="intro-flash"></div>
+      <div class="glow-ripple"></div>
+
+      <div class="particle particle-1"></div>
+      <div class="particle particle-2"></div>
+      <div class="particle particle-3"></div>
+      <div class="particle particle-4"></div>
+      <div class="particle particle-5"></div>
+      <div class="particle particle-6"></div>
+
+      <div class="intro-logo-wrap">
+        <img :src="mainLogo" alt="O'Connors AI" />
+      </div>
+    </div>
+
     <div class="page-transition-overlay" :class="{ active: isLeavingPage }"></div>
 
-    <aside class="sidebar" :class="{ collapsed: !isSidebarExpanded }">
+    <aside
+      class="sidebar"
+      :class="{ collapsed: !isSidebarExpanded, introSidebar: showIntro }"
+    >
       <div class="sidebar-top">
         <button
           class="brand-button"
@@ -741,15 +441,6 @@ onBeforeUnmount(() => {
           >
             <img :src="aiLogo" alt="Chatbot" class="nav-image-icon nav-chat-logo" />
             <span>Chatbot</span>
-          </button>
-
-          <button
-            class="nav-item"
-            :class="{ active: activeMode === 'doc' }"
-            @click="openDocViewerPanel"
-          >
-            <img :src="docLogo" alt="Document viewer" class="nav-image-icon" />
-            <span>Chat + Doc Viewer</span>
           </button>
         </div>
 
@@ -817,17 +508,6 @@ onBeforeUnmount(() => {
 
           <button
             class="collapsed-rail-item"
-            :class="{ active: activeMode === 'doc' }"
-            @click="openDocViewerPanel"
-            title="Chat + Doc Viewer"
-            aria-label="Chat + Doc Viewer"
-          >
-            <img :src="docLogo" alt="Doc Viewer" class="collapsed-rail-icon" />
-            <span class="collapsed-tooltip">Chat + Doc Viewer</span>
-          </button>
-
-          <button
-            class="collapsed-rail-item"
             @click="expandAndFocusSearch"
             title="Search"
             aria-label="Search"
@@ -862,7 +542,12 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="collapsed-bottom">
-          <button class="collapsed-logout-btn" @click="handleLogout" title="Logout" aria-label="Logout">
+          <button
+            class="collapsed-logout-btn"
+            @click="handleLogout"
+            title="Logout"
+            aria-label="Logout"
+          >
             <span class="collapsed-logout-icon">↩</span>
             <span class="collapsed-tooltip">Logout</span>
           </button>
@@ -883,9 +568,9 @@ onBeforeUnmount(() => {
       </template>
     </aside>
 
-    <main class="main-content" :class="{ 'doc-open': isDocViewerOpen }">
+    <main class="main-content">
       <div class="chat-panel">
-        <header class="topbar">
+        <header class="topbar" :class="{ introTopbar: showIntro }">
           <div class="topbar-left">
             <h1>Chatbot Assistant</h1>
 
@@ -908,6 +593,7 @@ onBeforeUnmount(() => {
         </header>
 
         <ChatMessages
+          :class="{ introMessages: showIntro }"
           :current-chat="currentChat"
           :show-welcome="showWelcome"
           :display-name="displayName"
@@ -918,40 +604,16 @@ onBeforeUnmount(() => {
           :get-file-badge="getFileBadge"
           @close-menu="openMenuChatId = null"
           @open-document="openDocumentFromMessage"
-          @choose-comparison="chooseComparisonOption"
         />
 
-        <ChatInput
-          :input-value="inputValue"
-          :attached-files="attachedFiles"
-          :attach-logo="attachLogo"
-          :get-file-badge="getFileBadge"
-          @update-input="inputValue = $event"
-          @add-files="handleFileChange"
-          @remove-file="removeAttachedFile"
-          @send-message="sendMessage"
-        />
+        <div :class="{ introInput: showIntro }">
+          <ChatInput
+            :input-value="inputValue"
+            @update-input="inputValue = $event"
+            @send-message="sendMessage"
+          />
+        </div>
       </div>
-
-      <DocViewer
-        :is-open="isDocViewerOpen"
-        :current-chat="currentChat"
-        :preview-file="previewFile"
-        :preview-file-url="previewFileUrl"
-        :current-preview-file-name="currentPreviewFileName"
-        :doc-search-query="docSearchQuery"
-        :is-doc-loading="isDocLoading"
-        :is-pdf-preview="isPdfPreview"
-        :is-word-preview="isWordPreview"
-        :is-excel-preview="isExcelPreview"
-        :is-image-preview="isImagePreview"
-        :office-viewer-url="officeViewerUrl"
-        :supported-preview-text="supportedPreviewText"
-        :doc-logo="docLogo"
-        :get-file-badge="getFileBadge"
-        @close="closeDocViewerPanel"
-        @update-search="docSearchQuery = $event"
-      />
     </main>
   </div>
 </template>
@@ -967,6 +629,152 @@ onBeforeUnmount(() => {
   font-family: 'Inter', sans-serif;
   overflow: hidden;
   position: relative;
+}
+
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background:
+    radial-gradient(circle at center, rgba(47, 140, 255, 0.22), transparent 32%),
+    #03050a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation:
+    cameraZoomIntro 3.2s ease forwards,
+    introFadeOut 0.6s ease forwards;
+  animation-delay: 0s, 2.65s;
+  pointer-events: none;
+}
+
+.intro-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(120, 185, 255, 0.28);
+  opacity: 0;
+  animation: screenFlash 0.42s ease-out forwards;
+  animation-delay: 0.55s;
+}
+
+.glow-ripple {
+  position: absolute;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  border: 2px solid rgba(77, 163, 255, 0.75);
+  box-shadow:
+    0 0 30px rgba(77, 163, 255, 0.7),
+    inset 0 0 18px rgba(77, 163, 255, 0.25);
+  opacity: 0;
+  animation: glowRipple 1.4s ease-out forwards;
+  animation-delay: 0.55s;
+}
+
+.intro-logo-wrap {
+  width: 110px;
+  height: 110px;
+  border-radius: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(47, 140, 255, 0.14);
+  box-shadow:
+    0 0 34px rgba(47, 140, 255, 0.55),
+    0 0 90px rgba(47, 140, 255, 0.25);
+  animation:
+    logoFlyIn 1.8s cubic-bezier(0.18, 0.9, 0.25, 1.2) forwards,
+    logoPulseBeforeFade 0.8s ease-in-out forwards;
+  animation-delay: 0s, 1.9s;
+}
+
+.intro-logo-wrap img {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 22px rgba(255, 255, 255, 0.32));
+  animation: introLogoSpin 1.8s cubic-bezier(0.18, 0.9, 0.25, 1.2) forwards;
+}
+
+.particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4da3ff;
+  box-shadow:
+    0 0 12px rgba(77, 163, 255, 0.9),
+    0 0 28px rgba(77, 163, 255, 0.45);
+  opacity: 0;
+  animation: particleBurst 1.35s ease-out forwards;
+}
+
+.particle-1 {
+  top: 48%;
+  left: 48%;
+  animation-delay: 0.18s;
+  --x: -160px;
+  --y: -100px;
+}
+
+.particle-2 {
+  top: 50%;
+  left: 50%;
+  animation-delay: 0.24s;
+  --x: 170px;
+  --y: -80px;
+}
+
+.particle-3 {
+  top: 52%;
+  left: 49%;
+  animation-delay: 0.3s;
+  --x: -140px;
+  --y: 115px;
+}
+
+.particle-4 {
+  top: 50%;
+  left: 51%;
+  animation-delay: 0.36s;
+  --x: 150px;
+  --y: 120px;
+}
+
+.particle-5 {
+  top: 49%;
+  left: 50%;
+  animation-delay: 0.42s;
+  --x: 0px;
+  --y: -170px;
+}
+
+.particle-6 {
+  top: 51%;
+  left: 50%;
+  animation-delay: 0.48s;
+  --x: 0px;
+  --y: 170px;
+}
+
+.introSidebar {
+  animation: sidebarIntro 0.75s ease both;
+  animation-delay: 2.4s;
+}
+
+.introTopbar {
+  animation: topbarIntro 0.75s ease both;
+  animation-delay: 2.5s;
+}
+
+.introMessages {
+  animation: messagesIntro 0.8s ease both;
+  animation-delay: 2.7s;
+}
+
+.introInput {
+  animation: inputIntro 0.8s ease both;
+  animation-delay: 2.9s;
 }
 
 .page-transition-overlay {
@@ -1282,11 +1090,6 @@ onBeforeUnmount(() => {
   color: #dce7ff;
 }
 
-.collapsed-rail-item.active .collapsed-rail-icon,
-.selected-chat-item .collapsed-rail-icon {
-  filter: drop-shadow(0 0 6px rgba(17, 132, 255, 0.35));
-}
-
 .collapsed-tooltip {
   position: absolute;
   left: 62px;
@@ -1555,10 +1358,6 @@ onBeforeUnmount(() => {
   transition: width 0.34s ease;
 }
 
-.main-content.doc-open .chat-panel {
-  width: calc(100% - 48%);
-}
-
 .topbar {
   height: 86px;
   display: flex;
@@ -1659,6 +1458,158 @@ onBeforeUnmount(() => {
   transform: translateY(-8px);
 }
 
+@keyframes screenFlash {
+  0% { opacity: 0; }
+  35% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes glowRipple {
+  0% {
+    transform: scale(0.25);
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(6);
+    opacity: 0;
+  }
+}
+
+@keyframes logoFlyIn {
+  0% {
+    transform: translateY(90px) scale(0.3) rotate(-18deg);
+    opacity: 0;
+  }
+
+  55% {
+    transform: translateY(0) scale(1.15) rotate(4deg);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes introLogoSpin {
+  0% {
+    transform: rotate(-220deg) scale(0.55);
+  }
+
+  60% {
+    transform: rotate(20deg) scale(1.12);
+  }
+
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes logoPulseBeforeFade {
+  0% {
+    transform: scale(1);
+    box-shadow:
+      0 0 34px rgba(47, 140, 255, 0.55),
+      0 0 90px rgba(47, 140, 255, 0.25);
+  }
+
+  45% {
+    transform: scale(1.16);
+    box-shadow:
+      0 0 48px rgba(47, 140, 255, 0.85),
+      0 0 120px rgba(47, 140, 255, 0.42);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 34px rgba(47, 140, 255, 0.55),
+      0 0 90px rgba(47, 140, 255, 0.25);
+  }
+}
+
+@keyframes particleBurst {
+  0% {
+    transform: translate(0, 0) scale(0.3);
+    opacity: 0;
+  }
+
+  25% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(var(--x), var(--y)) scale(1.2);
+    opacity: 0;
+  }
+}
+
+@keyframes cameraZoomIntro {
+  0% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes introFadeOut {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes sidebarIntro {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes topbarIntro {
+  from {
+    transform: translateY(-80px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes messagesIntro {
+  from {
+    transform: translateY(36px) scale(0.98);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes inputIntro {
+  from {
+    transform: translateY(70px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @keyframes heartbeatGlow {
   0% { transform: scale(0.9); opacity: 0.25; }
   25% { transform: scale(1.02); opacity: 0.45; }
@@ -1670,12 +1621,6 @@ onBeforeUnmount(() => {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
-}
-
-@media (max-width: 1100px) {
-  .main-content.doc-open .chat-panel {
-    width: calc(100% - 44%);
-  }
 }
 
 @media (max-width: 900px) {
@@ -1702,10 +1647,6 @@ onBeforeUnmount(() => {
 
   .topbar h1 {
     font-size: 18px;
-  }
-
-  .main-content.doc-open .chat-panel {
-    width: 100%;
   }
 }
 </style>

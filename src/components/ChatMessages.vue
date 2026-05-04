@@ -26,7 +26,11 @@
         :class="message.role"
       >
         <div
-          v-if="message.role === 'assistant' || message.role === 'thinking' || message.role === 'comparison_result'"
+          v-if="
+            message.role === 'assistant' ||
+            message.role === 'thinking' ||
+            message.role === 'comparison_result'
+          "
           class="assistant-icon"
           :class="{ thinkingIcon: message.role === 'thinking' }"
         >
@@ -66,10 +70,35 @@
               </div>
             </div>
 
-            <div v-if="message.text">{{ message.text }}</div>
+            <div v-if="message.text" class="formatted-answer">
+              <template
+                v-if="
+                  message.role === 'assistant' ||
+                  message.role === 'comparison_result'
+                "
+              >
+                <ul>
+                  <li
+                    v-for="point in formatBulletPoints(message.text)"
+                    :key="point"
+                  >
+                    {{ point }}
+                  </li>
+                </ul>
+              </template>
+
+              <template v-else>
+                {{ message.text }}
+              </template>
+            </div>
 
             <div
-              v-if="message.documents && message.documents.length && (message.role === 'assistant' || message.role === 'comparison_result')"
+              v-if="
+                message.documents &&
+                message.documents.length &&
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result')
+              "
               class="assistant-document-links"
             >
               <button
@@ -82,74 +111,6 @@
                 Pg 1: {{ document.name }}
               </button>
             </div>
-
-            <transition name="compare-fade">
-              <div
-                v-if="
-                  message.role === 'assistant' &&
-                  message.compared &&
-                  message.comparisonOptions &&
-                  !message.chosenOption
-                "
-                class="comparison-dual-wrap"
-              >
-                <transition name="response-card-left">
-                  <div class="comparison-response-card">
-                    <div class="comparison-response-header">
-                      <div class="comparison-response-icon">
-                        <img :src="mainLogo" alt="AI" />
-                      </div>
-                      <span>{{ message.comparisonOptions.left }}</span>
-                    </div>
-
-                    <div class="comparison-response-body">
-                      <h4>Processing image</h4>
-                      <p>
-                        Lots of people are creating images right now, so this might take a bit.
-                        We'll notify you when your image is ready.
-                      </p>
-                    </div>
-
-                    <div class="comparison-response-footer">
-                      <button
-                        class="comparison-prefer-btn"
-                        @click="$emit('choose-comparison', message.id, 'left')"
-                      >
-                        I prefer this response
-                      </button>
-                    </div>
-                  </div>
-                </transition>
-
-                <transition name="response-card-right">
-                  <div class="comparison-response-card">
-                    <div class="comparison-response-header">
-                      <div class="comparison-response-icon">
-                        <img :src="mainLogo" alt="AI" />
-                      </div>
-                      <span>{{ message.comparisonOptions.right }}</span>
-                    </div>
-
-                    <div class="comparison-response-body">
-                      <h4>Processing image</h4>
-                      <p>
-                        Lots of people are creating images right now, so this might take a bit.
-                        We'll notify you when your image is ready.
-                      </p>
-                    </div>
-
-                    <div class="comparison-response-footer">
-                      <button
-                        class="comparison-prefer-btn"
-                        @click="$emit('choose-comparison', message.id, 'right')"
-                      >
-                        I prefer this response
-                      </button>
-                    </div>
-                  </div>
-                </transition>
-              </div>
-            </transition>
           </template>
         </div>
       </div>
@@ -173,12 +134,6 @@ type Message = {
   fileNames?: string[]
   docReference?: string
   documents?: MessageDocument[]
-  compared?: boolean
-  comparisonOptions?: {
-    left: string
-    right: string
-  }
-  chosenOption?: 'left' | 'right' | null
 }
 
 type ChatItem = {
@@ -186,6 +141,13 @@ type ChatItem = {
   name: string
   messages: Message[]
   selectedDocumentId?: string | null
+}
+
+function formatBulletPoints(text: string) {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map(point => point.trim())
+    .filter(point => point.length > 0)
 }
 
 defineProps<{
@@ -202,7 +164,6 @@ defineProps<{
 defineEmits<{
   (e: 'close-menu'): void
   (e: 'open-document', document: MessageDocument): void
-  (e: 'choose-comparison', messageId: number, option: 'left' | 'right'): void
 }>()
 </script>
 
@@ -406,6 +367,20 @@ defineEmits<{
   animation: assistantBubbleIn 0.34s ease;
 }
 
+.formatted-answer ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.formatted-answer li {
+  margin-bottom: 8px;
+  line-height: 1.7;
+}
+
+.formatted-answer li:last-child {
+  margin-bottom: 0;
+}
+
 .comparisonResultBubble {
   width: 100%;
   max-width: 860px;
@@ -494,104 +469,6 @@ defineEmits<{
     inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
-.comparison-dual-wrap {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
-  gap: 18px;
-  width: 100%;
-}
-
-.comparison-response-card {
-  border-radius: 22px;
-  overflow: hidden;
-  background: linear-gradient(180deg, rgba(11, 18, 34, 0.98), rgba(8, 13, 24, 0.98));
-  border: 1px solid rgba(55, 92, 168, 0.22);
-  box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.22),
-    0 0 24px rgba(25, 84, 201, 0.08),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
-  animation: compareCardIn 0.34s ease;
-}
-
-.comparison-response-header {
-  height: 72px;
-  padding: 0 22px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  border-bottom: 1px solid rgba(77, 163, 255, 0.12);
-  color: #f4f4f6;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.comparison-response-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 1px solid rgba(77, 163, 255, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(16, 32, 69, 0.55);
-  flex-shrink: 0;
-}
-
-.comparison-response-icon img {
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  opacity: 0.92;
-}
-
-.comparison-response-body {
-  margin: 18px 18px 0;
-  padding: 24px 22px 26px;
-  border-radius: 24px;
-  border: 1px solid rgba(77, 163, 255, 0.12);
-  background: linear-gradient(180deg, rgba(17, 25, 45, 0.94), rgba(13, 18, 33, 0.94));
-}
-
-.comparison-response-body h4 {
-  margin: 0 0 12px;
-  color: #ffffff;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.comparison-response-body p {
-  margin: 0;
-  color: #d9e6ff;
-  font-size: 15px;
-  line-height: 1.8;
-}
-
-.comparison-response-footer {
-  padding: 18px 18px 22px;
-}
-
-.comparison-prefer-btn {
-  height: 46px;
-  padding: 0 20px;
-  border: none;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #111111;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    transform 0.22s ease,
-    box-shadow 0.22s ease,
-    opacity 0.22s ease;
-}
-
-.comparison-prefer-btn:hover {
-  transform: translateY(-1px) scale(1.02);
-  box-shadow: 0 10px 24px rgba(255, 255, 255, 0.12);
-}
-
 .thinkingBubble {
   min-width: 84px;
   min-height: 56px;
@@ -622,34 +499,14 @@ defineEmits<{
 }
 
 .fade-up-enter-active,
-.fade-up-leave-active,
-.compare-fade-enter-active,
-.compare-fade-leave-active,
-.response-card-left-enter-active,
-.response-card-left-leave-active,
-.response-card-right-enter-active,
-.response-card-right-leave-active {
+.fade-up-leave-active {
   transition: all 0.3s ease;
 }
 
 .fade-up-enter-from,
-.fade-up-leave-to,
-.compare-fade-enter-from,
-.compare-fade-leave-to {
+.fade-up-leave-to {
   opacity: 0;
   transform: translateY(10px);
-}
-
-.response-card-left-enter-from,
-.response-card-left-leave-to {
-  opacity: 0;
-  transform: translateX(-26px) scale(0.96);
-}
-
-.response-card-right-enter-from,
-.response-card-right-leave-to {
-  opacity: 0;
-  transform: translateX(26px) scale(0.96);
 }
 
 @keyframes heartbeatGlow {
@@ -690,11 +547,6 @@ defineEmits<{
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes compareCardIn {
-  0% { opacity: 0; transform: translateY(10px) scale(0.985); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
-}
-
 @keyframes thinkingLogoSpin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -712,12 +564,6 @@ defineEmits<{
   100% {
     transform: scale(1.22);
     opacity: 0;
-  }
-}
-
-@media (max-width: 1100px) {
-  .comparison-dual-wrap {
-    grid-template-columns: 1fr;
   }
 }
 </style>
