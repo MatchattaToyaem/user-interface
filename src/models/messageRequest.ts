@@ -1,4 +1,5 @@
 export interface MessageRequest {
-    message: string;
+    sessionId: string;
     sender: string;
+    message: string;
 }

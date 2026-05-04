@@ -3,6 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
+import { chatSessionService, type ChatHistoryEntry } from '@/services/chatSessionService'
+import { useChatService } from '@/services/websocketService'
+import type { MessageResponse } from '@/models/messageResponse'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
@@ -12,7 +15,8 @@ import chatLogo from '@/assets/chat-logo.png'
 type MessageDocument = {
   id: string
   name: string
-  file: File
+  documentPath?: string
+  file?: File
 }
 
 type MessageRole = 'user' | 'assistant' | 'thinking' | 'comparison_result'
@@ -28,6 +32,7 @@ type Message = {
 
 type ChatItem = {
   id: number
+  sessionId: string
   name: string
   messages: Message[]
   selectedDocumentId?: string | null
@@ -36,9 +41,64 @@ type ChatItem = {
 const router = useRouter()
 const userStore = useUserStore()
 
+const pendingThinkingId = ref<number | null>(null)
+const pendingFileNames = ref<string[]>([])
+const pendingDocuments = ref<MessageDocument[]>([])
+const pendingFirstFile = ref<File | null>(null)
+
+function handleBackendResponse(response: MessageResponse) {
+  const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat || pendingThinkingId.value === null) return
+
+  const thinkingIndex = selectedChat.messages.findIndex(
+    msg => msg.id === pendingThinkingId.value
+  )
+
+  if (thinkingIndex !== -1) {
+    const sourceDocuments: MessageDocument[] = (response.sources || []).map((s, index) => ({
+      id: `source-${s.chunk_id || index}-${Date.now()}`,
+      name: s.file,
+      documentPath: s.document_path
+    }))
+
+    const assistantMessage: Message = {
+      id: nextMessageId++,
+      role: 'assistant',
+      text: '',
+      fileNames: pendingFileNames.value.length ? [...pendingFileNames.value] : undefined,
+      documents: sourceDocuments.length ? sourceDocuments : undefined,
+      docReference: pendingFirstFile.value ? `Pg 1: ${pendingFirstFile.value.name}` : undefined
+    }
+
+    maybeAttachComparisonPrompt(assistantMessage)
+    selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
+
+    typeAssistantMessage(response.message, (typed) => {
+      const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
+      if (!liveChat) return
+      const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
+      if (!liveMessage) return
+      liveMessage.text = typed
+    })
+  }
+
+  pendingThinkingId.value = null
+  pendingFileNames.value = []
+  pendingDocuments.value = []
+  pendingFirstFile.value = null
+}
+
+const {
+  isConnected,
+  connect: wsConnect,
+  disconnect: wsDisconnect,
+  sendMessage: wsSendMessage
+} = useChatService(handleBackendResponse)
+
 const activeMode = ref<'chat'>('chat')
 const showIntro = ref(true)
 const isConnected = ref(false)
+const activeMode = ref<'chat' | 'doc'>('chat')
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
@@ -46,9 +106,16 @@ const inputValue = ref('')
 const searchQuery = ref('')
 const openMenuChatId = ref<number | null>(null)
 const animatedText = ref('')
+const attachedFiles = ref<File[]>([])
+const previewFile = ref<File | null>(null)
+const previewFileName = ref<string>('')
+const previewFileUrl = ref('')
+const assistantReplyCount = ref(0)
 const typingSpeed = 18
 
 const phrases = ['Ask about specific projects', 'Troubleshoot a problem', 'Ask a question']
+
+const documentServiceUrl = import.meta.env.VITE_DOCUMENT_SERVICE_URL || 'http://localhost:8083'
 
 let phraseIndex = 0
 let charIndex = 0
@@ -74,17 +141,10 @@ const displayRole = computed(() => {
 const userInitial = computed(() => displayName.value.charAt(0).toUpperCase())
 const userPhoto = computed(() => (userStore as any).account?.idTokenClaims?.picture || '')
 
-const chats = ref<ChatItem[]>([
-  {
-    id: 1,
-    name: 'New Chat',
-    messages: [],
-    selectedDocumentId: null
-  }
-])
+const chats = ref<ChatItem[]>([])
 
-const selectedChatId = ref(1)
-let nextChatId = 2
+const selectedChatId = ref<number | null>(null)
+let nextChatId = 1
 let nextMessageId = 1
 
 const currentChat = computed(() => {
@@ -106,6 +166,39 @@ const showWelcome = computed(() => {
   return !!currentChat.value &&
     currentChat.value.messages.length === 0 &&
     inputValue.value.trim() === ''
+})
+
+const supportedPreviewText = computed(() => {
+  return 'PDF, Word and Excel previews are supported'
+})
+
+const currentPreviewFileName = computed(() => {
+  return previewFile.value?.name || previewFileName.value || 'No document selected'
+})
+
+const isPdfPreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return !!name && name.endsWith('.pdf')
+})
+
+const isImagePreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')
+})
+
+const isWordPreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.doc') || name.endsWith('.docx')
+})
+
+const isExcelPreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.xls') || name.endsWith('.xlsx') || name.endsWith('.csv')
+})
+
+const officeViewerUrl = computed(() => {
+  if (!previewFileUrl.value) return ''
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewFileUrl.value)}`
 })
 
 function typeLoop() {
@@ -179,9 +272,45 @@ function toggleMenu(chatId: number) {
   openMenuChatId.value = openMenuChatId.value === chatId ? null : chatId
 }
 
-function selectChatById(chatId: number) {
+async function selectChatById(chatId: number) {
   selectedChatId.value = chatId
   openMenuChatId.value = null
+
+  const chat = chats.value.find(c => c.id === chatId)
+  if (!chat || chat.messages.length > 0) return
+
+  const session = await chatSessionService.getSessionById(chat.sessionId)
+  if (!session || !session.chatHistory) return
+
+  try {
+    const history: ChatHistoryEntry[] =
+      typeof session.chatHistory === 'string'
+        ? JSON.parse(session.chatHistory)
+        : session.chatHistory
+
+    for (const entry of history) {
+      chat.messages.push({
+        id: nextMessageId++,
+        role: 'user',
+        text: entry.question
+      })
+
+      const sourceDocuments: MessageDocument[] = (entry.sources || []).map((s, index) => ({
+        id: `source-${s.chunk_id || index}-${Date.now()}`,
+        name: s.file,
+        documentPath: s.document_path
+      }))
+
+      chat.messages.push({
+        id: nextMessageId++,
+        role: 'assistant',
+        text: entry.answer,
+        documents: sourceDocuments.length ? sourceDocuments : undefined
+      })
+    }
+  } catch {
+    console.error('Failed to parse chat history')
+  }
 }
 
 function renameChat(chatId: number) {
@@ -192,27 +321,32 @@ function renameChat(chatId: number) {
 
   if (newName && newName.trim()) {
     chat.name = newName.trim()
+    const userEmail = userStore.account?.username || 'anonymous'
+    chatSessionService.updateSession(chat.sessionId, {
+      chatName: chat.name,
+      userName: userEmail,
+      createdBy: userEmail
+    })
   }
 
   openMenuChatId.value = null
 }
 
-function deleteChat(chatId: number) {
-  if (chats.value.length === 1) {
-    chats.value[0] = {
-      id: chats.value[0].id,
-      name: 'New Chat',
-      messages: [],
-      selectedDocumentId: null
-    }
+async function deleteChat(chatId: number) {
+  const chat = chats.value.find(c => c.id === chatId)
+  if (chat) {
+    chatSessionService.deleteSession(chat.sessionId)
+  }
 
-    selectedChatId.value = chats.value[0].id
+  if (chats.value.length === 1) {
+    await startNewChat()
+    const oldIndex = chats.value.findIndex(c => c.id === chatId)
+    if (oldIndex !== -1) chats.value.splice(oldIndex, 1)
     openMenuChatId.value = null
-    inputValue.value = ''
     return
   }
 
-  const chatIndex = chats.value.findIndex(chat => chat.id === chatId)
+  const chatIndex = chats.value.findIndex(c => c.id === chatId)
   if (chatIndex === -1) return
 
   chats.value.splice(chatIndex, 1)
@@ -225,10 +359,19 @@ function deleteChat(chatId: number) {
   openMenuChatId.value = null
 }
 
-function startNewChat() {
+async function startNewChat() {
+  const userEmail = userStore.account?.username || 'anonymous'
+  const session = await chatSessionService.createSession({
+    chatName: 'New Chat',
+    userName: userEmail,
+    createdBy: userEmail,
+    status: 'active'
+  })
+
   const newChat: ChatItem = {
     id: nextChatId++,
-    name: 'New Chat',
+    sessionId: session?.id || crypto.randomUUID(),
+    name: session?.chatName || 'New Chat',
     messages: [],
     selectedDocumentId: null
   }
@@ -255,6 +398,184 @@ function getFileBadge(fileName: string) {
   return 'FILE'
 }
 
+function setPreviewFile(file: File) {
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+
+  previewFile.value = file
+  previewFileUrl.value = URL.createObjectURL(file)
+}
+
+function clearPreviewFile() {
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+
+  previewFile.value = null
+  previewFileName.value = ''
+  previewFileUrl.value = ''
+}
+
+function createMessageDocuments(files: File[]): MessageDocument[] {
+  return files.map((file, index) => ({
+    id: `${file.name}-${file.lastModified}-${file.size}-${index}-${Date.now()}`,
+    name: file.name,
+    file
+  }))
+}
+
+async function fetchDocumentBlob(documentPath: string): Promise<string> {
+  const token = await authService.getToken()
+  const response = await fetch(
+    `${documentServiceUrl}/documents/file?path=${encodeURIComponent(documentPath)}`,
+    token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  )
+  if (!response.ok) throw new Error(`Failed to fetch document: ${response.status}`)
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
+}
+
+async function loadDocumentPreview(document: MessageDocument) {
+  if (document.file) {
+    setPreviewFile(document.file)
+  } else if (document.documentPath) {
+    if (previewFileUrl.value) URL.revokeObjectURL(previewFileUrl.value)
+    previewFile.value = null
+    previewFileName.value = document.name
+    previewFileUrl.value = ''
+    try {
+      previewFileUrl.value = await fetchDocumentBlob(document.documentPath)
+    } catch (e) {
+      console.error('Failed to load document from document-service:', e)
+    }
+  }
+}
+
+function findDocumentByIdInChat(chat: ChatItem | null, documentId: string | null | undefined) {
+  if (!chat || !documentId) return null
+
+  for (const message of chat.messages) {
+    if (!message.documents || !message.documents.length) continue
+
+    const found = message.documents.find(document => document.id === documentId)
+    if (found) return found
+  }
+
+  return null
+}
+
+function findFirstDocumentInChat(chat: ChatItem | null) {
+  if (!chat) return null
+
+  for (const message of chat.messages) {
+    if (message.documents && message.documents.length) {
+      return message.documents[0]
+    }
+  }
+
+  return null
+}
+
+function syncPreviewFileFromChat(chat: ChatItem | null) {
+  if (!chat) {
+    clearPreviewFile()
+    return
+  }
+
+  const selectedDocument = findDocumentByIdInChat(chat, chat.selectedDocumentId)
+
+  if (selectedDocument) {
+    triggerDocLoading(320)
+    loadDocumentPreview(selectedDocument)
+    return
+  }
+
+  const firstDocument = findFirstDocumentInChat(chat)
+
+  if (firstDocument) {
+    chat.selectedDocumentId = firstDocument.id
+    triggerDocLoading(320)
+    loadDocumentPreview(firstDocument)
+    return
+  }
+
+  clearPreviewFile()
+}
+
+function syncPreviewFileFromCurrentChat() {
+  syncPreviewFileFromChat(currentChat.value)
+}
+
+function maybeAttachComparisonPrompt(targetMessage: Message) {
+  assistantReplyCount.value++
+
+  if (assistantReplyCount.value <= 1) return
+
+  const shouldShow = Math.random() < comparisonPromptProbability
+  if (!shouldShow) return
+
+  const randomLabels =
+    comparisonLabels[Math.floor(Math.random() * comparisonLabels.length)]
+
+  targetMessage.compared = true
+  targetMessage.comparisonOptions = {
+    left: randomLabels.left,
+    right: randomLabels.right
+  }
+  targetMessage.chosenOption = null
+}
+
+function chooseComparisonOption(messageId: number, option: 'left' | 'right') {
+  const chat = currentChat.value
+  if (!chat) return
+
+  const targetIndex = chat.messages.findIndex(msg => msg.id === messageId)
+  if (targetIndex === -1) return
+
+  const target = chat.messages[targetIndex]
+  if (!target || !target.compared || !target.comparisonOptions) return
+
+  target.chosenOption = option
+
+  const selectedTitle =
+    option === 'left'
+      ? target.comparisonOptions.left
+      : target.comparisonOptions.right
+
+  window.setTimeout(() => {
+    chat.messages.splice(targetIndex + 1, 0, {
+      id: nextMessageId++,
+      role: 'comparison_result',
+      text: `You selected ${selectedTitle}. I understand. This is a sample response area where the chatbot answer will appear.`,
+      documents: target.documents,
+      fileNames: target.fileNames
+    })
+  }, 260)
+}
+
+function isDocumentSelected(documentId: string) {
+  const chat = currentChat.value
+  if (!chat) return false
+  return chat.selectedDocumentId === documentId
+}
+
+async function openDocumentFromMessage(document: MessageDocument) {
+  const chat = currentChat.value
+  if (chat) {
+    chat.selectedDocumentId = document.id
+  }
+
+  docLoadToken.value = Date.now()
+  isDocLoading.value = true
+  activeMode.value = 'doc'
+  isDocViewerOpen.value = true
+
+  try {
+    await loadDocumentPreview(document)
+  } finally {
+    isDocLoading.value = false
+  }
 function isDocumentSelected() {
   return false
 }
@@ -288,6 +609,27 @@ function sendMessage() {
     text: ''
   })
 
+  const firstAttachedFile = userFiles.length ? userFiles[0] : null
+  const firstMessageDocument = messageDocuments.length ? messageDocuments[0] : null
+
+  if (firstMessageDocument && currentChat.value) {
+    currentChat.value.selectedDocumentId = firstMessageDocument.id
+    if (firstMessageDocument.file) setPreviewFile(firstMessageDocument.file)
+  }
+
+  attachedFiles.value = []
+
+  pendingThinkingId.value = thinkingMessageId
+  pendingFileNames.value = fileNames
+  pendingDocuments.value = messageDocuments
+  pendingFirstFile.value = firstAttachedFile
+
+  const userEmail = userStore.account?.username || 'anonymous'
+  wsSendMessage({
+    sessionId: currentChat.value?.sessionId || crypto.randomUUID(),
+    sender: userEmail,
+    message: text
+  })
   window.setTimeout(() => {
     const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
     if (!selectedChat) return
@@ -345,6 +687,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  wsDisconnect()
   window.removeEventListener('click', closeMenuOutside)
 
   if (typeTimeout !== null) {
