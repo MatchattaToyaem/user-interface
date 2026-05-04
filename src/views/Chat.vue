@@ -8,9 +8,11 @@ import { useChatService } from '@/services/websocketService'
 import type { MessageResponse } from '@/models/messageResponse'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import DocViewer from '@/components/DocViewer.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
 import aiLogo from '@/assets/ai-logo.png'
 import chatLogo from '@/assets/chat-logo.png'
+import docLogo from '@/assets/doc-logo.png'
 
 type MessageDocument = {
   id: string
@@ -28,6 +30,9 @@ type Message = {
   fileNames?: string[]
   docReference?: string
   documents?: MessageDocument[]
+  compared?: boolean
+  comparisonOptions?: { left: string; right: string }
+  chosenOption?: 'left' | 'right' | null
 }
 
 type ChatItem = {
@@ -89,16 +94,14 @@ function handleBackendResponse(response: MessageResponse) {
 }
 
 const {
-  isConnected,
   connect: wsConnect,
   disconnect: wsDisconnect,
   sendMessage: wsSendMessage
 } = useChatService(handleBackendResponse)
 
-const activeMode = ref<'chat'>('chat')
+const activeMode = ref<'chat' | 'doc'>('chat')
 const showIntro = ref(true)
 const isConnected = ref(false)
-const activeMode = ref<'chat' | 'doc'>('chat')
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
@@ -110,8 +113,19 @@ const attachedFiles = ref<File[]>([])
 const previewFile = ref<File | null>(null)
 const previewFileName = ref<string>('')
 const previewFileUrl = ref('')
+const isDocLoading = ref(false)
+const isDocViewerOpen = ref(false)
+const docLoadToken = ref(0)
+const docSearchQuery = ref('')
 const assistantReplyCount = ref(0)
 const typingSpeed = 18
+
+const comparisonPromptProbability = 0.3
+const comparisonLabels = [
+  { left: 'Response A', right: 'Response B' },
+  { left: 'Version 1', right: 'Version 2' },
+  { left: 'Option A', right: 'Option B' }
+]
 
 const phrases = ['Ask about specific projects', 'Troubleshoot a problem', 'Ask a question']
 
@@ -503,6 +517,13 @@ function syncPreviewFileFromChat(chat: ChatItem | null) {
   clearPreviewFile()
 }
 
+function triggerDocLoading(delayMs: number) {
+  isDocLoading.value = true
+  window.setTimeout(() => {
+    isDocLoading.value = false
+  }, delayMs)
+}
+
 function syncPreviewFileFromCurrentChat() {
   syncPreviewFileFromChat(currentChat.value)
 }
@@ -576,12 +597,6 @@ async function openDocumentFromMessage(document: MessageDocument) {
   } finally {
     isDocLoading.value = false
   }
-function isDocumentSelected() {
-  return false
-}
-
-function openDocumentFromMessage() {
-  return
 }
 
 function sendMessage() {
@@ -609,6 +624,9 @@ function sendMessage() {
     text: ''
   })
 
+  const userFiles = attachedFiles.value
+  const messageDocuments = createMessageDocuments(userFiles)
+  const fileNames = userFiles.map(f => f.name)
   const firstAttachedFile = userFiles.length ? userFiles[0] : null
   const firstMessageDocument = messageDocuments.length ? messageDocuments[0] : null
 
@@ -669,6 +687,8 @@ async function handleLogout() {
 }
 
 onMounted(() => {
+  wsConnect()
+
   window.setTimeout(() => {
     isConnected.value = true
   }, 1800)
@@ -958,6 +978,26 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </main>
+
+    <DocViewer
+      :is-open="isDocViewerOpen"
+      :current-chat="currentChat"
+      :preview-file="previewFile"
+      :preview-file-url="previewFileUrl"
+      :current-preview-file-name="currentPreviewFileName"
+      :doc-search-query="docSearchQuery"
+      :is-doc-loading="isDocLoading"
+      :is-pdf-preview="isPdfPreview"
+      :is-word-preview="isWordPreview"
+      :is-excel-preview="isExcelPreview"
+      :is-image-preview="isImagePreview"
+      :office-viewer-url="officeViewerUrl"
+      :supported-preview-text="supportedPreviewText"
+      :doc-logo="docLogo"
+      :get-file-badge="getFileBadge"
+      @close="isDocViewerOpen = false"
+      @update-search="docSearchQuery = $event"
+    />
   </div>
 </template>
 
