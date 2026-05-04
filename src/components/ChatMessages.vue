@@ -101,7 +101,7 @@
                 :class="{ selected: isDocumentSelected(document.id) }"
                 @click="$emit('open-document', document)"
               >
-                Pg 1: {{ document.name }}
+                {{ document.name }}
               </button>
             </div>
           </template>
