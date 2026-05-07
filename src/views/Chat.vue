@@ -3,10 +3,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
+
+import LightTheme from '@/components/LightTheme.vue'
+import Intro from '@/components/Intro.vue'
+import ChatSidebar from '@/components/ChatSidebar.vue'
+import ChatTopbar from '@/components/ChatTopbar.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import ThemeEffects from '@/components/ThemeEffects.vue'
+
 import mainLogo from '@/assets/oconnors-logo.png'
-import aiLogo from '@/assets/ai-logo.png'
+import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
 
 type MessageDocument = {
@@ -36,24 +43,50 @@ type ChatItem = {
 const router = useRouter()
 const userStore = useUserStore()
 
-const activeMode = ref<'chat'>('chat')
 const showIntro = ref(true)
 const isConnected = ref(false)
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
+
+const isLightTheme = ref(false)
+
+const themeTransition = ref<'light-wipe' | 'dark-wipe' | null>(null)
+
+const showFireworks = ref(false)
+
 const inputValue = ref('')
 const searchQuery = ref('')
+
 const openMenuChatId = ref<number | null>(null)
+
+const editingChatId = ref<number | null>(null)
+const editingChatName = ref('')
+
 const animatedText = ref('')
+
+const isGenerating = ref(false)
+const generatingMessageId = ref<number | null>(null)
+const thinkingMessageId = ref<number | null>(null)
+
+const isChatNearBottom = ref(true)
+
 const typingSpeed = 18
 
-const phrases = ['Ask about specific projects', 'Troubleshoot a problem', 'Ask a question']
+let typingIntervalId: number | null = null
+let responseTimeoutId: number | null = null
+
+const phrases = [
+  'Ask about specific projects',
+  'Troubleshoot a problem',
+  'Ask a question'
+]
 
 let phraseIndex = 0
 let charIndex = 0
 let isDeleting = false
 let typeTimeout: number | null = null
+
 const activeTypingIntervals = new Set<number>()
 
 const displayName = computed(() => {
@@ -71,8 +104,13 @@ const displayRole = computed(() => {
   return 'User'
 })
 
-const userInitial = computed(() => displayName.value.charAt(0).toUpperCase())
-const userPhoto = computed(() => (userStore as any).account?.idTokenClaims?.picture || '')
+const userInitial = computed(() => {
+  return displayName.value.charAt(0).toUpperCase()
+})
+
+const userPhoto = computed(() => {
+  return (userStore as any).account?.idTokenClaims?.picture || ''
+})
 
 const chats = ref<ChatItem[]>([
   {
@@ -84,6 +122,7 @@ const chats = ref<ChatItem[]>([
 ])
 
 const selectedChatId = ref(1)
+
 let nextChatId = 2
 let nextMessageId = 1
 
@@ -93,8 +132,14 @@ const currentChat = computed(() => {
 
 const filteredChats = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return chats.value
-  return chats.value.filter(chat => chat.name.toLowerCase().includes(query))
+
+  if (!query) {
+    return chats.value
+  }
+
+  return chats.value.filter(chat =>
+    chat.name.toLowerCase().includes(query)
+  )
 })
 
 const selectedChatName = computed(() => {
@@ -103,9 +148,7 @@ const selectedChatName = computed(() => {
 })
 
 const showWelcome = computed(() => {
-  return !!currentChat.value &&
-    currentChat.value.messages.length === 0 &&
-    inputValue.value.trim() === ''
+  return !!currentChat.value && currentChat.value.messages.length === 0
 })
 
 function typeLoop() {
@@ -133,22 +176,35 @@ function typeLoop() {
   typeTimeout = window.setTimeout(typeLoop, speed)
 }
 
-function typeAssistantMessage(fullText: string, done: (typed: string) => void) {
+function typeAssistantMessage(
+  fullText: string,
+  done: (typed: string) => void,
+  complete: () => void
+) {
   let index = 0
   let typed = ''
 
-  const interval = window.setInterval(() => {
+  typingIntervalId = window.setInterval(() => {
     typed += fullText[index]
+
     done(typed)
+
     index++
 
     if (index >= fullText.length) {
-      clearInterval(interval)
-      activeTypingIntervals.delete(interval)
+      if (typingIntervalId !== null) {
+        clearInterval(typingIntervalId)
+
+        activeTypingIntervals.delete(typingIntervalId)
+
+        typingIntervalId = null
+      }
+
+      complete()
     }
   }, typingSpeed)
 
-  activeTypingIntervals.add(interval)
+  activeTypingIntervals.add(typingIntervalId)
 }
 
 function toggleSidebar() {
@@ -163,6 +219,7 @@ function handleBrandButtonClick() {
 
 async function expandAndFocusSearch() {
   isSidebarExpanded.value = true
+
   await nextTick()
 }
 
@@ -172,11 +229,15 @@ function closeMenuOutside() {
 
 function handleSearchEnter() {
   const firstMatch = filteredChats.value[0]
-  if (firstMatch) selectedChatId.value = firstMatch.id
+
+  if (firstMatch) {
+    selectedChatId.value = firstMatch.id
+  }
 }
 
 function toggleMenu(chatId: number) {
-  openMenuChatId.value = openMenuChatId.value === chatId ? null : chatId
+  openMenuChatId.value =
+    openMenuChatId.value === chatId ? null : chatId
 }
 
 function selectChatById(chatId: number) {
@@ -186,15 +247,30 @@ function selectChatById(chatId: number) {
 
 function renameChat(chatId: number) {
   const chat = chats.value.find(item => item.id === chatId)
+
   if (!chat) return
 
-  const newName = window.prompt('Rename chat', chat.name)
-
-  if (newName && newName.trim()) {
-    chat.name = newName.trim()
-  }
+  editingChatId.value = chatId
+  editingChatName.value = chat.name
 
   openMenuChatId.value = null
+}
+
+function saveInlineRename(chatId: number) {
+  const chat = chats.value.find(item => item.id === chatId)
+
+  if (!chat) return
+
+  if (editingChatName.value.trim()) {
+    chat.name = editingChatName.value.trim()
+  }
+
+  editingChatId.value = null
+  editingChatName.value = ''
+}
+function cancelInlineRename() {
+  editingChatId.value = null
+  editingChatName.value = ''
 }
 
 function deleteChat(chatId: number) {
@@ -209,10 +285,12 @@ function deleteChat(chatId: number) {
     selectedChatId.value = chats.value[0].id
     openMenuChatId.value = null
     inputValue.value = ''
+
     return
   }
 
   const chatIndex = chats.value.findIndex(chat => chat.id === chatId)
+
   if (chatIndex === -1) return
 
   chats.value.splice(chatIndex, 1)
@@ -234,22 +312,25 @@ function startNewChat() {
   }
 
   chats.value.unshift(newChat)
+
   selectedChatId.value = newChat.id
+
   inputValue.value = ''
   searchQuery.value = ''
+
   openMenuChatId.value = null
 }
 
-function setChatMode() {
-  activeMode.value = 'chat'
-}
-
 function getFileBadge(fileName: string) {
-  const extension = fileName.split('.').pop()?.toLowerCase() || ''
+  const extension =
+    fileName.split('.').pop()?.toLowerCase() || ''
 
   if (extension === 'pdf') return 'PDF'
+
   if (['doc', 'docx'].includes(extension)) return 'DOC'
+
   if (['xls', 'xlsx', 'csv'].includes(extension)) return 'XLS'
+
   if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 'IMG'
 
   return 'FILE'
@@ -263,10 +344,59 @@ function openDocumentFromMessage() {
   return
 }
 
+function handleChatScrollState(isNearBottom: boolean) {
+  isChatNearBottom.value = isNearBottom
+}
+
+function stopGeneration() {
+  if (!currentChat.value || !isGenerating.value) return
+
+  if (responseTimeoutId !== null) {
+    clearTimeout(responseTimeoutId)
+    responseTimeoutId = null
+  }
+
+  if (typingIntervalId !== null) {
+    clearInterval(typingIntervalId)
+
+    activeTypingIntervals.delete(typingIntervalId)
+
+    typingIntervalId = null
+  }
+
+  const selectedChat = currentChat.value
+
+  const thinkingIndex = selectedChat.messages.findIndex(
+    msg => msg.id === thinkingMessageId.value
+  )
+
+  if (thinkingIndex !== -1) {
+    selectedChat.messages.splice(thinkingIndex, 1, {
+      id: nextMessageId++,
+      role: 'assistant',
+      text: 'Response generation was interrupted by the user.'
+    })
+  } else if (generatingMessageId.value !== null) {
+    const message = selectedChat.messages.find(
+      msg => msg.id === generatingMessageId.value
+    )
+
+    if (message) {
+      message.text = message.text.trim()
+        ? `${message.text}\n\nResponse generation was interrupted by the user.`
+        : 'Response generation was interrupted by the user.'
+    }
+  }
+
+  isGenerating.value = false
+  generatingMessageId.value = null
+  thinkingMessageId.value = null
+}
+
 function sendMessage() {
   const text = inputValue.value.trim()
 
-  if (!text || !currentChat.value) return
+  if (!text || !currentChat.value || isGenerating.value) return
 
   currentChat.value.messages.push({
     id: nextMessageId++,
@@ -275,24 +405,37 @@ function sendMessage() {
   })
 
   if (currentChat.value.name === 'New Chat') {
-    currentChat.value.name = text.length > 28 ? text.slice(0, 28) + '...' : text
+    currentChat.value.name =
+      text.length > 28
+        ? text.slice(0, 28) + '...'
+        : text
   }
 
   inputValue.value = ''
 
-  const thinkingMessageId = nextMessageId++
+  isGenerating.value = true
+  isChatNearBottom.value = true
+
+  const newThinkingMessageId = nextMessageId++
+
+  thinkingMessageId.value = newThinkingMessageId
 
   currentChat.value.messages.push({
-    id: thinkingMessageId,
+    id: newThinkingMessageId,
     role: 'thinking',
     text: ''
   })
 
-  window.setTimeout(() => {
-    const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
+  responseTimeoutId = window.setTimeout(() => {
+    const selectedChat = chats.value.find(
+      chat => chat.id === selectedChatId.value
+    )
+
     if (!selectedChat) return
 
-    const thinkingIndex = selectedChat.messages.findIndex(msg => msg.id === thinkingMessageId)
+    const thinkingIndex = selectedChat.messages.findIndex(
+      msg => msg.id === newThinkingMessageId
+    )
 
     if (thinkingIndex !== -1) {
       const assistantMessage: Message = {
@@ -301,28 +444,72 @@ function sendMessage() {
         text: ''
       }
 
-      selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
+      generatingMessageId.value = assistantMessage.id
+
+      selectedChat.messages.splice(
+        thinkingIndex,
+        1,
+        assistantMessage
+      )
 
       typeAssistantMessage(
         'I understand. This is a sample response area where the chatbot answer will appear.',
         typed => {
-          const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
+          const liveChat = chats.value.find(
+            chat => chat.id === selectedChatId.value
+          )
+
           if (!liveChat) return
 
-          const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
+          const liveMessage = liveChat.messages.find(
+            msg => msg.id === assistantMessage.id
+          )
+
           if (!liveMessage) return
 
           liveMessage.text = typed
+        },
+        () => {
+          isGenerating.value = false
+          generatingMessageId.value = null
+          thinkingMessageId.value = null
+          responseTimeoutId = null
         }
       )
     }
   }, 1800)
 }
 
+function toggleTheme() {
+  themeTransition.value =
+    isLightTheme.value
+      ? 'dark-wipe'
+      : 'light-wipe'
+
+  window.setTimeout(() => {
+    isLightTheme.value = !isLightTheme.value
+  }, 280)
+
+  window.setTimeout(() => {
+    themeTransition.value = null
+  }, 850)
+}
+
+function triggerFireworks() {
+  showFireworks.value = true
+
+  window.setTimeout(() => {
+    showFireworks.value = false
+  }, 1500)
+}
+
 async function handleLogout() {
   isLeavingPage.value = true
+
   await new Promise(resolve => setTimeout(resolve, 260))
+
   await authService.logout()
+
   router.push('/login')
 }
 
@@ -336,454 +523,195 @@ onMounted(() => {
   }, 3200)
 
   window.setTimeout(() => {
-    const nav = navigator as Navigator & { vibrate?: (pattern: number | number[]) => boolean }
+    const nav =
+      navigator as Navigator & {
+        vibrate?: (
+          pattern: number | number[]
+        ) => boolean
+      }
+
     nav.vibrate?.([30, 40, 30])
   }, 550)
 
   window.addEventListener('click', closeMenuOutside)
+
   typeLoop()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('click', closeMenuOutside)
+  window.removeEventListener(
+    'click',
+    closeMenuOutside
+  )
 
   if (typeTimeout !== null) {
     clearTimeout(typeTimeout)
   }
 
-  activeTypingIntervals.forEach(interval => clearInterval(interval))
+  if (responseTimeoutId !== null) {
+    clearTimeout(responseTimeoutId)
+  }
+
+  if (typingIntervalId !== null) {
+    clearInterval(typingIntervalId)
+  }
+
+  activeTypingIntervals.forEach(interval =>
+    clearInterval(interval)
+  )
+
   activeTypingIntervals.clear()
 })
 </script>
 
 <template>
-  <div class="chat-page">
-    <div v-if="showIntro" class="intro-overlay">
-      <div class="intro-flash"></div>
-      <div class="glow-ripple"></div>
+  <LightTheme :is-light-theme="isLightTheme">
+    <div class="chat-page">
+      <Intro
+        :show-intro="showIntro"
+        :main-logo="mainLogo"
+        :sidebar-expanded="isSidebarExpanded"
 
-      <div class="particle particle-1"></div>
-      <div class="particle particle-2"></div>
-      <div class="particle particle-3"></div>
-      <div class="particle particle-4"></div>
-      <div class="particle particle-5"></div>
-      <div class="particle particle-6"></div>
+      />
 
-      <div class="intro-logo-wrap">
-        <img :src="mainLogo" alt="O'Connors AI" />
-      </div>
-    </div>
+      <ThemeEffects
+        :theme-transition="themeTransition"
+        :show-fireworks="showFireworks"
+      />
 
-    <div class="page-transition-overlay" :class="{ active: isLeavingPage }"></div>
+      <div
+        class="page-transition-overlay"
+        :class="{ active: isLeavingPage }"
+      ></div>
 
-    <aside
-      class="sidebar"
-      :class="{ collapsed: !isSidebarExpanded, introSidebar: showIntro }"
-    >
-      <div class="sidebar-top">
-        <button
-          class="brand-button"
-          :class="{ collapsed: !isSidebarExpanded }"
-          @click="handleBrandButtonClick"
-          @mouseenter="isBrandHovered = true"
-          @mouseleave="isBrandHovered = false"
-        >
-          <div v-if="isSidebarExpanded" class="brand">
-            <div class="brand-logo-wrap">
-              <div class="brand-pulse brand-pulse-1"></div>
-              <div class="brand-pulse brand-pulse-2"></div>
-              <div class="brand-logo">
-                <img :src="mainLogo" alt="O'Connors AI" />
+      <ChatSidebar
+        :show-intro="showIntro"
+        :is-sidebar-expanded="isSidebarExpanded"
+        :is-brand-hovered="isBrandHovered"
+        :main-logo="isLightTheme ? logoPng : mainLogo"
+        :chat-logo="chatLogo"
+        :search-query="searchQuery"
+        :filtered-chats="filteredChats"
+        :selected-chat-id="selectedChatId"
+        :selected-chat-name="selectedChatName"
+        :open-menu-chat-id="openMenuChatId"
+        :editing-chat-id="editingChatId"
+        :editing-chat-name="editingChatName"
+        :display-name="displayName"
+        :display-role="displayRole"
+        :user-initial="userInitial"
+        :user-photo="userPhoto"
+        @toggle-sidebar="toggleSidebar"
+        @brand-click="handleBrandButtonClick"
+        @brand-hover="isBrandHovered = $event"
+        @update-search="searchQuery = $event"
+        @search-enter="handleSearchEnter"
+        @select-chat="selectChatById"
+        @toggle-menu="toggleMenu"
+        @rename-chat="renameChat"
+        @delete-chat="deleteChat"
+        @update-editing-name="editingChatName = $event"
+        @save-rename="saveInlineRename"
+        @cancel-rename="cancelInlineRename"
+        @new-chat="startNewChat"
+        @logout="handleLogout"
+        @expand-sidebar="isSidebarExpanded = true"
+        @expand-search="expandAndFocusSearch"
+      />
+
+      <main class="main-content">
+        <div class="chat-panel">
+          <ChatTopbar
+            :show-intro="showIntro"
+            :is-connected="isConnected"
+            :is-light-theme="isLightTheme"
+            @new-chat="startNewChat"
+            @toggle-theme="toggleTheme"
+          />
+
+          <ChatMessages
+            :class="{ introMessages: showIntro }"
+            :current-chat="currentChat"
+            :show-welcome="showWelcome"
+            :display-name="displayName"
+            :animated-text="animatedText"
+            :main-logo="mainLogo"
+            :ai-logo="mainLogo"
+            :is-document-selected="isDocumentSelected"
+            :get-file-badge="getFileBadge"
+            :generating-message-id="generatingMessageId"
+            @close-menu="openMenuChatId = null"
+            @open-document="openDocumentFromMessage"
+            @scroll-state="handleChatScrollState"
+            @three-perfect-ratings="triggerFireworks"
+          />
+
+          <div :class="{ introInput: showIntro }">
+            <Transition name="reply-indicator">
+              <div
+                v-if="
+                  isGenerating &&
+                  !isChatNearBottom
+                "
+                class="floating-reply-indicator"
+              >
+                <span></span>
+                <span></span>
+                <span></span>
               </div>
-            </div>
+            </Transition>
 
-            <div class="brand-text">O'Connors AI</div>
-          </div>
-
-          <div v-else class="collapsed-brand">
-            <img
-              v-if="!isBrandHovered"
-              :src="mainLogo"
-              alt="O'Connors AI"
-              class="collapsed-brand-logo"
+            <ChatInput
+              :input-value="inputValue"
+              :is-generating="isGenerating"
+              @update-input="inputValue = $event"
+              @send-message="sendMessage"
+              @stop-message="stopGeneration"
             />
-            <span v-else class="collapsed-sidebar-icon">☰</span>
           </div>
-        </button>
-
-        <button
-          v-if="isSidebarExpanded"
-          class="sidebar-toggle-icon-btn"
-          @click="toggleSidebar"
-          aria-label="Collapse sidebar"
-          title="Collapse sidebar"
-        >
-          <span>⟨</span>
-        </button>
-      </div>
-
-      <template v-if="isSidebarExpanded">
-        <div class="search-box">
-          <span class="search-icon">⌕</span>
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="Search..."
-            @keyup.enter="handleSearchEnter"
-          />
         </div>
-
-        <div class="nav-section">
-          <button
-            class="nav-item"
-            :class="{ active: activeMode === 'chat' }"
-            @click="setChatMode"
-          >
-            <img :src="aiLogo" alt="Chatbot" class="nav-image-icon nav-chat-logo" />
-            <span>Chatbot</span>
-          </button>
-        </div>
-
-        <div class="history-section">
-          <p class="history-title">CHAT HISTORY</p>
-
-          <TransitionGroup name="chat-delete" tag="div" class="history-list">
-            <div
-              v-for="chat in filteredChats"
-              :key="chat.id"
-              class="history-item"
-              :class="{ selected: selectedChatId === chat.id }"
-              @click="selectChatById(chat.id)"
-            >
-              <div class="history-left">
-                <img :src="chatLogo" alt="Chat" class="history-img-icon" />
-                <span class="history-text">{{ chat.name }}</span>
-              </div>
-
-              <div class="history-actions">
-                <button class="history-menu" @click.stop="toggleMenu(chat.id)">•••</button>
-
-                <div v-if="openMenuChatId === chat.id" class="history-dropdown">
-                  <button @click.stop="renameChat(chat.id)">Rename</button>
-                  <button class="delete-action" @click.stop="deleteChat(chat.id)">
-                    Delete Chat
-                  </button>
-                </div>
-              </div>
-            </div>
-          </TransitionGroup>
-        </div>
-
-        <div class="sidebar-bottom">
-          <div class="profile-card">
-            <div class="profile-avatar">
-              <img v-if="userPhoto" :src="userPhoto" alt="Profile photo" class="profile-photo" />
-              <span v-else>{{ userInitial }}</span>
-            </div>
-            <div class="profile-info">
-              <div class="profile-name">{{ displayName }}</div>
-              <div class="profile-role">{{ displayRole }}</div>
-            </div>
-          </div>
-
-          <button class="logout-btn" @click="handleLogout">
-            <span class="logout-icon">↩</span>
-            <span>Logout</span>
-          </button>
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="collapsed-rail">
-          <button
-            class="collapsed-rail-item"
-            :class="{ active: activeMode === 'chat' }"
-            @click="setChatMode"
-            title="Chatbot"
-            aria-label="Chatbot"
-          >
-            <img :src="aiLogo" alt="Chatbot" class="collapsed-rail-icon collapsed-chat-logo" />
-            <span class="collapsed-tooltip">Chatbot</span>
-          </button>
-
-          <button
-            class="collapsed-rail-item"
-            @click="expandAndFocusSearch"
-            title="Search"
-            aria-label="Search"
-          >
-            <span class="collapsed-search-icon">⌕</span>
-            <span class="collapsed-tooltip">Search</span>
-          </button>
-
-          <button
-            class="collapsed-rail-item"
-            @click="startNewChat"
-            title="New Chat"
-            aria-label="New Chat"
-          >
-            <img :src="chatLogo" alt="New Chat" class="collapsed-rail-icon collapsed-chat-logo" />
-            <span class="collapsed-tooltip">New Chat</span>
-          </button>
-
-          <div class="collapsed-rail-divider"></div>
-
-          <button
-            class="collapsed-rail-item selected-chat-item"
-            @click="isSidebarExpanded = true"
-            :title="selectedChatName"
-            aria-label="Current selected chat"
-          >
-            <img :src="chatLogo" alt="Current Chat" class="collapsed-rail-icon collapsed-chat-logo" />
-            <span class="collapsed-tooltip current-chat-tooltip">
-              {{ selectedChatName }}
-            </span>
-          </button>
-        </div>
-
-        <div class="collapsed-bottom">
-          <button
-            class="collapsed-logout-btn"
-            @click="handleLogout"
-            title="Logout"
-            aria-label="Logout"
-          >
-            <span class="collapsed-logout-icon">↩</span>
-            <span class="collapsed-tooltip">Logout</span>
-          </button>
-
-          <button
-            class="collapsed-user-btn"
-            @click="isSidebarExpanded = true"
-            :title="displayName"
-            aria-label="User profile"
-          >
-            <div class="collapsed-user-avatar">
-              <img v-if="userPhoto" :src="userPhoto" alt="Profile photo" class="profile-photo" />
-              <span v-else>{{ userInitial }}</span>
-            </div>
-            <span class="collapsed-tooltip">{{ displayName }}</span>
-          </button>
-        </div>
-      </template>
-    </aside>
-
-    <main class="main-content">
-      <div class="chat-panel">
-        <header class="topbar" :class="{ introTopbar: showIntro }">
-          <div class="topbar-left">
-            <h1>Chatbot Assistant</h1>
-
-            <transition name="fade-slide" mode="out-in">
-              <span v-if="isConnected" key="ready" class="status-pill ready">
-                <span class="status-dot ready-dot"></span>
-                Ready
-              </span>
-
-              <span v-else key="connecting" class="status-pill connecting">
-                <span class="status-dot connecting-dot"></span>
-                Connecting...
-              </span>
-            </transition>
-          </div>
-
-          <button class="new-chat-btn" @click="startNewChat">
-            ＋ New Chat
-          </button>
-        </header>
-
-        <ChatMessages
-          :class="{ introMessages: showIntro }"
-          :current-chat="currentChat"
-          :show-welcome="showWelcome"
-          :display-name="displayName"
-          :animated-text="animatedText"
-          :main-logo="mainLogo"
-          :ai-logo="mainLogo"
-          :is-document-selected="isDocumentSelected"
-          :get-file-badge="getFileBadge"
-          @close-menu="openMenuChatId = null"
-          @open-document="openDocumentFromMessage"
-        />
-
-        <div :class="{ introInput: showIntro }">
-          <ChatInput
-            :input-value="inputValue"
-            @update-input="inputValue = $event"
-            @send-message="sendMessage"
-          />
-        </div>
-      </div>
-    </main>
-  </div>
+      </main>
+    </div>
+  </LightTheme>
 </template>
 
 <style scoped>
 .chat-page {
   display: flex;
   height: 100vh;
+
   background:
-    radial-gradient(circle at center, rgba(0, 102, 255, 0.05) 0%, transparent 35%),
-    linear-gradient(180deg, #05070d 0%, #03050a 100%);
+    radial-gradient(
+      circle at center,
+      rgba(0, 102, 255, 0.05) 0%,
+      transparent 35%
+    ),
+    linear-gradient(
+      180deg,
+      #05070d 0%,
+      #03050a 100%
+    );
+
   color: #ffffff;
+
   font-family: 'Inter', sans-serif;
+
   overflow: hidden;
   position: relative;
-}
-
-.intro-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background:
-    radial-gradient(circle at center, rgba(47, 140, 255, 0.22), transparent 32%),
-    #03050a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation:
-    cameraZoomIntro 3.2s ease forwards,
-    introFadeOut 0.6s ease forwards;
-  animation-delay: 0s, 2.65s;
-  pointer-events: none;
-}
-
-.intro-flash {
-  position: absolute;
-  inset: 0;
-  background: rgba(120, 185, 255, 0.28);
-  opacity: 0;
-  animation: screenFlash 0.42s ease-out forwards;
-  animation-delay: 0.55s;
-}
-
-.glow-ripple {
-  position: absolute;
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  border: 2px solid rgba(77, 163, 255, 0.75);
-  box-shadow:
-    0 0 30px rgba(77, 163, 255, 0.7),
-    inset 0 0 18px rgba(77, 163, 255, 0.25);
-  opacity: 0;
-  animation: glowRipple 1.4s ease-out forwards;
-  animation-delay: 0.55s;
-}
-
-.intro-logo-wrap {
-  width: 110px;
-  height: 110px;
-  border-radius: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(47, 140, 255, 0.14);
-  box-shadow:
-    0 0 34px rgba(47, 140, 255, 0.55),
-    0 0 90px rgba(47, 140, 255, 0.25);
-  animation:
-    logoFlyIn 1.8s cubic-bezier(0.18, 0.9, 0.25, 1.2) forwards,
-    logoPulseBeforeFade 0.8s ease-in-out forwards;
-  animation-delay: 0s, 1.9s;
-}
-
-.intro-logo-wrap img {
-  width: 76px;
-  height: 76px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 22px rgba(255, 255, 255, 0.32));
-  animation: introLogoSpin 1.8s cubic-bezier(0.18, 0.9, 0.25, 1.2) forwards;
-}
-
-.particle {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4da3ff;
-  box-shadow:
-    0 0 12px rgba(77, 163, 255, 0.9),
-    0 0 28px rgba(77, 163, 255, 0.45);
-  opacity: 0;
-  animation: particleBurst 1.35s ease-out forwards;
-}
-
-.particle-1 {
-  top: 48%;
-  left: 48%;
-  animation-delay: 0.18s;
-  --x: -160px;
-  --y: -100px;
-}
-
-.particle-2 {
-  top: 50%;
-  left: 50%;
-  animation-delay: 0.24s;
-  --x: 170px;
-  --y: -80px;
-}
-
-.particle-3 {
-  top: 52%;
-  left: 49%;
-  animation-delay: 0.3s;
-  --x: -140px;
-  --y: 115px;
-}
-
-.particle-4 {
-  top: 50%;
-  left: 51%;
-  animation-delay: 0.36s;
-  --x: 150px;
-  --y: 120px;
-}
-
-.particle-5 {
-  top: 49%;
-  left: 50%;
-  animation-delay: 0.42s;
-  --x: 0px;
-  --y: -170px;
-}
-
-.particle-6 {
-  top: 51%;
-  left: 50%;
-  animation-delay: 0.48s;
-  --x: 0px;
-  --y: 170px;
-}
-
-.introSidebar {
-  animation: sidebarIntro 0.75s ease both;
-  animation-delay: 2.4s;
-}
-
-.introTopbar {
-  animation: topbarIntro 0.75s ease both;
-  animation-delay: 2.5s;
-}
-
-.introMessages {
-  animation: messagesIntro 0.8s ease both;
-  animation-delay: 2.7s;
-}
-
-.introInput {
-  animation: inputIntro 0.8s ease both;
-  animation-delay: 2.9s;
 }
 
 .page-transition-overlay {
   position: absolute;
   inset: 0;
+
   background: rgba(2, 4, 10, 0.95);
+
   opacity: 0;
+
   pointer-events: none;
+
   transition: opacity 0.26s ease;
+
   z-index: 100;
 }
 
@@ -791,809 +719,128 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.sidebar {
-  width: 308px;
-  min-width: 308px;
-  max-width: 308px;
-  background: linear-gradient(180deg, rgba(10, 16, 32, 0.97), rgba(6, 10, 22, 0.99));
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  display: flex;
-  flex-direction: column;
-  padding: 16px 16px 22px;
-  overflow: hidden;
-  transition:
-    width 0.28s ease,
-    min-width 0.28s ease,
-    max-width 0.28s ease,
-    padding 0.28s ease;
-}
-
-.sidebar.collapsed {
-  width: 82px;
-  min-width: 82px;
-  max-width: 82px;
-  padding: 16px 10px 18px;
-}
-
-.sidebar-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.brand-button {
-  border: none;
-  background: transparent;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  flex: 1;
-  text-align: left;
-}
-
-.brand-button.collapsed {
-  display: flex;
-  justify-content: center;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 6px 8px 12px;
-}
-
-.brand-logo-wrap {
-  position: relative;
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.brand-pulse {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(43, 140, 255, 0.18);
-  animation: heartbeatGlow 2.2s infinite ease-in-out;
-}
-
-.brand-pulse-1 {
-  width: 46px;
-  height: 46px;
-}
-
-.brand-pulse-2 {
-  width: 58px;
-  height: 58px;
-  animation-delay: 0.35s;
-}
-
-.brand-logo {
-  position: relative;
-  z-index: 2;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  overflow: hidden;
-  box-shadow: 0 0 20px rgba(41, 121, 255, 0.5);
-}
-
-.brand-logo img,
-.collapsed-brand-logo {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: drop-shadow(0 0 16px rgba(37, 99, 235, 0.55));
-}
-
-.brand-text {
-  font-size: 16px;
-  font-weight: 700;
-  color: #f4f7ff;
-}
-
-.collapsed-brand {
-  width: 52px;
-  height: 52px;
-  margin: 2px auto 6px;
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s ease, transform 0.2s ease;
-}
-
-.brand-button.collapsed:hover .collapsed-brand {
-  background: rgba(255, 255, 255, 0.06);
-  transform: translateY(-1px);
-}
-
-.collapsed-brand-logo {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-}
-
-.collapsed-sidebar-icon {
-  font-size: 24px;
-  color: #dce7ff;
-  line-height: 1;
-}
-
-.sidebar-toggle-icon-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid rgba(90, 140, 255, 0.22);
-  background: rgba(12, 18, 32, 0.72);
-  color: #9ec3ff;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.22s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.sidebar-toggle-icon-btn:hover {
-  background: rgba(19, 33, 58, 0.88);
-  border-color: rgba(90, 140, 255, 0.38);
-  box-shadow: 0 0 18px rgba(37, 99, 235, 0.14);
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 14px;
-  border-radius: 14px;
-  background: rgba(9, 14, 28, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  margin-bottom: 22px;
-}
-
-.search-icon {
-  color: #77809a;
-  font-size: 14px;
-}
-
-.search-box input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #d8def0;
-  font-size: 14px;
-}
-
-.search-box input::placeholder {
-  color: #6d7488;
-}
-
-.nav-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.nav-item {
-  height: 46px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 14px;
-  background: transparent;
-  border: none;
-  border-radius: 16px;
-  color: #aeb8cf;
-  font-size: 15px;
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.25s ease;
-}
-
-.nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #ffffff;
-}
-
-.nav-item.active {
-  background: rgba(255, 255, 255, 0.13);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.nav-image-icon {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
-  flex-shrink: 0;
-}
-
-.nav-chat-logo {
-  border-radius: 50%;
-}
-
-.collapsed-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  margin-top: 8px;
-  padding-top: 10px;
-  position: relative;
-}
-
-.collapsed-rail-divider {
-  width: 36px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  margin: 4px 0 2px;
-}
-
-.collapsed-rail-item,
-.collapsed-user-btn,
-.collapsed-logout-btn {
-  width: 52px;
-  height: 52px;
-  border: none;
-  border-radius: 18px;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  position: relative;
-  transition:
-    background 0.22s ease,
-    transform 0.22s ease,
-    box-shadow 0.22s ease;
-}
-
-.collapsed-rail-item:hover,
-.collapsed-user-btn:hover,
-.collapsed-logout-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  transform: translateY(-1px);
-}
-
-.collapsed-rail-item.active,
-.selected-chat-item {
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow:
-    inset 0 0 0 1px rgba(17, 132, 255, 0.16),
-    0 0 16px rgba(17, 132, 255, 0.08);
-}
-
-.collapsed-rail-icon {
-  width: 26px;
-  height: 26px;
-  object-fit: contain;
-}
-
-.collapsed-chat-logo {
-  border-radius: 50%;
-}
-
-.collapsed-search-icon,
-.collapsed-logout-icon {
-  font-size: 28px;
-  line-height: 1;
-  color: #dce7ff;
-}
-
-.collapsed-tooltip {
-  position: absolute;
-  left: 62px;
-  top: 50%;
-  transform: translateY(-50%) translateX(-4px);
-  background: rgba(14, 18, 28, 0.98);
-  color: #f3f6ff;
-  font-size: 12px;
-  line-height: 1;
-  padding: 9px 11px;
-  border-radius: 10px;
-  white-space: nowrap;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.18s ease;
-  z-index: 30;
-}
-
-.collapsed-rail-item:hover .collapsed-tooltip,
-.collapsed-user-btn:hover .collapsed-tooltip,
-.collapsed-logout-btn:hover .collapsed-tooltip {
-  opacity: 1;
-  transform: translateY(-50%) translateX(0);
-}
-
-.current-chat-tooltip {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.history-section {
-  flex: 1;
-  padding-top: 22px;
-  overflow-y: auto;
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.history-title {
-  font-size: 12px;
-  letter-spacing: 1.6px;
-  color: #6f7993;
-  margin: 0 0 14px;
-  font-weight: 700;
-}
-
-.history-item {
-  min-height: 42px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  color: #a8b1c8;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.25s ease, box-shadow 0.28s ease, transform 0.2s ease;
-  position: relative;
-}
-
-.history-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-  transform: translateY(-1px);
-}
-
-.history-item.selected {
-  border: 1px solid #1184ff;
-  color: #ffffff;
-  background: linear-gradient(180deg, rgba(7, 15, 30, 0.95), rgba(6, 12, 24, 0.95));
-  box-shadow:
-    inset 0 0 0 1px rgba(17, 132, 255, 0.2),
-    0 0 0 1px rgba(17, 132, 255, 0.08),
-    0 0 18px rgba(17, 132, 255, 0.18),
-    0 0 34px rgba(17, 132, 255, 0.08);
-}
-
-.history-item.selected .history-text {
-  color: #ffffff;
-  text-shadow: 0 0 10px rgba(17, 132, 255, 0.18);
-}
-
-.history-item.selected .history-img-icon {
-  filter: drop-shadow(0 0 6px rgba(17, 132, 255, 0.45));
-  opacity: 1;
-}
-
-.history-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.history-img-icon {
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  opacity: 0.9;
-  flex-shrink: 0;
-  border-radius: 50%;
-}
-
-.history-text {
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.history-actions {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.history-menu {
-  background: transparent;
-  border: none;
-  color: #95a0ba;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.history-dropdown {
-  position: absolute;
-  top: 28px;
-  right: 0;
-  min-width: 122px;
-  padding: 6px;
-  border-radius: 10px;
-  background: rgba(18, 22, 34, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-  z-index: 20;
-}
-
-.history-dropdown button {
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: #e7ebf5;
-  font-size: 14px;
-  text-align: left;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.history-dropdown button:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.delete-action {
-  color: #ff7b7b !important;
-}
-
-.delete-action:hover {
-  background: rgba(255, 80, 80, 0.08) !important;
-}
-
-.chat-delete-leave-active {
-  transition: all 0.22s ease;
-}
-
-.chat-delete-leave-to {
-  opacity: 0;
-  transform: scale(0.8);
-}
-
-.chat-delete-move {
-  transition: transform 0.22s ease;
-}
-
-.sidebar-bottom {
-  margin-top: auto;
-}
-
-.profile-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 10px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.profile-avatar,
-.collapsed-user-avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: #f0f0f0;
-  color: #0f172a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  overflow: hidden;
-}
-
-.profile-photo {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.profile-name {
-  font-size: 15px;
-  color: #ffffff;
-}
-
-.profile-role {
-  font-size: 13px;
-  color: #7f89a2;
-}
-
-.logout-btn {
-  width: 100%;
-  height: 42px;
-  margin-top: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #d8def0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 0.22s ease;
-}
-
-.logout-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 18px rgba(255, 255, 255, 0.06);
-}
-
-.collapsed-bottom {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
 .main-content {
   flex: 1;
+
   display: flex;
+
   min-width: 0;
+
   position: relative;
+
   overflow: hidden;
 }
 
 .chat-panel {
   flex: 1;
+
   display: flex;
   flex-direction: column;
+
   min-width: 0;
+
   transition: width 0.34s ease;
 }
 
-.topbar {
-  height: 86px;
+.floating-reply-indicator {
+  width: 78px;
+  height: 48px;
+
+  margin: 0 auto 10px;
+
+  border-radius: 28px;
+
+  border: 1px solid rgba(255, 255, 255, 0.15);
+
+  background: rgba(16, 20, 32, 0.88);
+
+  box-shadow:
+    0 0 22px rgba(47, 140, 255, 0.14),
+    inset 0 0 18px rgba(255, 255, 255, 0.03);
+
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 28px;
-  background: linear-gradient(90deg, rgba(11, 16, 30, 0.96), rgba(8, 12, 22, 0.78));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.topbar h1 {
-  font-size: 20px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1;
-  color: #f5f7fd;
-}
-
-.status-pill {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
+
+  gap: 7px;
 }
 
-.connecting {
-  color: #ff5b45;
-  background: rgba(255, 91, 69, 0.08);
-  border: 1px solid rgba(255, 91, 69, 0.22);
-}
-
-.ready {
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.2);
-}
-
-.status-dot {
+.floating-reply-indicator span {
   width: 7px;
   height: 7px;
+
   border-radius: 50%;
+
+  background: #dfe6f5;
+
+  animation:
+    floatingDotBounce 1.1s infinite ease-in-out;
 }
 
-.connecting-dot {
-  background: #ff5b45;
-  box-shadow: 0 0 10px rgba(255, 91, 69, 0.8);
-  animation: blink 1s infinite;
+.floating-reply-indicator span:nth-child(2) {
+  animation-delay: 0.15s;
 }
 
-.ready-dot {
-  background: #10b981;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.75);
+.floating-reply-indicator span:nth-child(3) {
+  animation-delay: 0.3s;
 }
 
-.new-chat-btn {
-  height: 42px;
-  padding: 0 22px;
-  border-radius: 15px;
-  border: 1px solid #1387ff;
-  background: transparent;
-  color: #15a0ff;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: transform 0.22s ease, box-shadow 0.22s ease, background 0.22s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
+.reply-indicator-enter-active,
+.reply-indicator-leave-active {
+  transition:
+    all 0.24s
+    cubic-bezier(0.18, 0.9, 0.25, 1.2);
 }
 
-.new-chat-btn:hover {
-  transform: scale(1.07);
-  box-shadow: 0 0 22px rgba(19, 135, 255, 0.28);
-  background: rgba(19, 135, 255, 0.06);
-}
-
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.3s ease;
-}
-
-.fade-slide-enter-from,
-.fade-slide-leave-to {
+.reply-indicator-enter-from,
+.reply-indicator-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
+
+  transform:
+    translateY(16px)
+    scale(0.72);
 }
 
-@keyframes screenFlash {
-  0% { opacity: 0; }
-  35% { opacity: 1; }
-  100% { opacity: 0; }
+.introMessages {
+  animation:
+    messagesIntro 0.8s ease both;
+
+  animation-delay: 2.7s;
 }
 
-@keyframes glowRipple {
-  0% {
-    transform: scale(0.25);
-    opacity: 0;
-  }
+.introInput {
+  animation:
+    inputIntro 0.8s ease both;
 
-  20% {
-    opacity: 1;
-  }
-
-  100% {
-    transform: scale(6);
-    opacity: 0;
-  }
+  animation-delay: 2.9s;
 }
 
-@keyframes logoFlyIn {
-  0% {
-    transform: translateY(90px) scale(0.3) rotate(-18deg);
-    opacity: 0;
-  }
-
-  55% {
-    transform: translateY(0) scale(1.15) rotate(4deg);
-    opacity: 1;
-  }
-
-  100% {
-    transform: translateY(0) scale(1) rotate(0deg);
-    opacity: 1;
-  }
-}
-
-@keyframes introLogoSpin {
-  0% {
-    transform: rotate(-220deg) scale(0.55);
-  }
-
-  60% {
-    transform: rotate(20deg) scale(1.12);
-  }
-
-  100% {
-    transform: rotate(0deg) scale(1);
-  }
-}
-
-@keyframes logoPulseBeforeFade {
-  0% {
-    transform: scale(1);
-    box-shadow:
-      0 0 34px rgba(47, 140, 255, 0.55),
-      0 0 90px rgba(47, 140, 255, 0.25);
-  }
-
-  45% {
-    transform: scale(1.16);
-    box-shadow:
-      0 0 48px rgba(47, 140, 255, 0.85),
-      0 0 120px rgba(47, 140, 255, 0.42);
-  }
-
-  100% {
-    transform: scale(1);
-    box-shadow:
-      0 0 34px rgba(47, 140, 255, 0.55),
-      0 0 90px rgba(47, 140, 255, 0.25);
-  }
-}
-
-@keyframes particleBurst {
-  0% {
-    transform: translate(0, 0) scale(0.3);
-    opacity: 0;
-  }
-
-  25% {
-    opacity: 1;
-  }
-
-  100% {
-    transform: translate(var(--x), var(--y)) scale(1.2);
-    opacity: 0;
-  }
-}
-
-@keyframes cameraZoomIntro {
-  0% { transform: scale(1.08); }
-  100% { transform: scale(1); }
-}
-
-@keyframes introFadeOut {
-  to {
-    opacity: 0;
-    visibility: hidden;
-  }
-}
-
-@keyframes sidebarIntro {
-  from {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes topbarIntro {
-  from {
-    transform: translateY(-80px);
-    opacity: 0;
-  }
-
-  to {
+@keyframes floatingDotBounce {
+  0%, 80%, 100% {
     transform: translateY(0);
+    opacity: 0.45;
+  }
+
+  40% {
+    transform: translateY(-5px);
     opacity: 1;
   }
 }
 
 @keyframes messagesIntro {
   from {
-    transform: translateY(36px) scale(0.98);
+    transform:
+      translateY(36px)
+      scale(0.98);
+
     opacity: 0;
   }
 
   to {
-    transform: translateY(0) scale(1);
+    transform:
+      translateY(0)
+      scale(1);
+
     opacity: 1;
   }
 }
@@ -1607,46 +854,6 @@ onBeforeUnmount(() => {
   to {
     transform: translateY(0);
     opacity: 1;
-  }
-}
-
-@keyframes heartbeatGlow {
-  0% { transform: scale(0.9); opacity: 0.25; }
-  25% { transform: scale(1.02); opacity: 0.45; }
-  40% { transform: scale(0.96); opacity: 0.3; }
-  60% { transform: scale(1.08); opacity: 0.5; }
-  100% { transform: scale(1.2); opacity: 0; }
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-@media (max-width: 900px) {
-  .sidebar {
-    width: 82px;
-    min-width: 82px;
-    max-width: 82px;
-    padding: 14px 8px 18px;
-  }
-
-  .sidebar:not(.collapsed) {
-    width: 260px;
-    min-width: 260px;
-    max-width: 260px;
-  }
-
-  .topbar {
-    padding: 0 18px;
-  }
-
-  .topbar-left {
-    gap: 10px;
-  }
-
-  .topbar h1 {
-    font-size: 18px;
   }
 }
 </style>

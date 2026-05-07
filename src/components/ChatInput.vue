@@ -7,28 +7,52 @@
           type="text"
           placeholder="Ask a question or describe an issue..."
           @input="onInput"
-          @keyup.enter="$emit('send-message')"
+          @keyup.enter="handleEnter"
         />
 
-        <button class="send-btn" @click="$emit('send-message')">➤</button>
+        <button
+          class="send-btn"
+          :class="{ stopMode: isGenerating }"
+          @click="handleButtonClick"
+        >
+          <span v-if="isGenerating" class="stop-icon"></span>
+          <span v-else>➤</span>
+        </button>
       </div>
     </div>
   </footer>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   inputValue: string
+  isGenerating: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update-input', value: string): void
   (e: 'send-message'): void
+  (e: 'stop-message'): void
 }>()
 
 function onInput(event: Event) {
   const target = event.target as HTMLInputElement
   emit('update-input', target.value)
+}
+
+function handleButtonClick() {
+  if (props.isGenerating) {
+    emit('stop-message')
+    return
+  }
+
+  emit('send-message')
+}
+
+function handleEnter() {
+  if (!props.isGenerating) {
+    emit('send-message')
+  }
 }
 </script>
 
@@ -80,7 +104,14 @@ function onInput(event: Event) {
   font-size: 18px;
   cursor: pointer;
   box-shadow: 0 0 18px rgba(47, 140, 255, 0.35);
-  transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    filter 0.22s ease,
+    background 0.22s ease;
 }
 
 .send-btn:hover {
@@ -90,6 +121,30 @@ function onInput(event: Event) {
     0 0 34px rgba(47, 140, 255, 0.38),
     0 0 52px rgba(47, 140, 255, 0.18);
   filter: brightness(1.05);
+}
+
+.send-btn.stopMode {
+  background: linear-gradient(180deg, #ff5f5f, #d92f2f);
+  box-shadow:
+    0 0 18px rgba(255, 80, 80, 0.35),
+    0 0 38px rgba(255, 80, 80, 0.18);
+}
+
+.send-btn.stopMode:hover {
+  transform: scale(1.12);
+  box-shadow:
+    0 0 18px rgba(255, 80, 80, 0.45),
+    0 0 36px rgba(255, 80, 80, 0.28),
+    0 0 58px rgba(255, 80, 80, 0.16);
+}
+
+.stop-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: #ffffff;
+  display: inline-block;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
 }
 
 @media (max-width: 900px) {
