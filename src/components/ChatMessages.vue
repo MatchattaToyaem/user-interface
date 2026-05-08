@@ -265,6 +265,7 @@ type Message = {
   docReference?: string
   documents?: MessageDocument[]
   answerId?: string
+  rating?: number
 }
 
 type ChatItem = {
@@ -355,6 +356,19 @@ watch(
   () => {
     scrollToBottom()
   }
+)
+
+watch(
+  () => props.currentChat?.id,
+  () => {
+    if (!props.currentChat) return
+    for (const message of props.currentChat.messages) {
+      if (message.rating && !ratings.value[message.id]) {
+        ratings.value[message.id] = message.rating
+      }
+    }
+  },
+  { immediate: true }
 )
 
 watch(

@@ -39,6 +39,7 @@ type Message = {
   comparisonOptions?: { left: string; right: string }
   chosenOption?: 'left' | 'right' | null
   answerId?: string
+  rating?: number
 }
 
 type ChatItem = {
@@ -367,7 +368,6 @@ async function selectChatById(chatId: number) {
         : session.chatHistory
 
     for (const entry of history) {
-      console.log('[history] answerId:', entry.answerId)
       chat.messages.push({
         id: nextMessageId++,
         role: 'user',
@@ -385,7 +385,8 @@ async function selectChatById(chatId: number) {
         role: 'assistant',
         text: entry.answer,
         documents: sourceDocuments.length ? sourceDocuments : undefined,
-        answerId: entry.answerId
+        answerId: entry.answerId,
+        rating: entry.rating
       })
     }
   } catch {
