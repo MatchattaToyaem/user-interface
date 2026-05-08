@@ -87,12 +87,12 @@ export const chatSessionService = {
     return res.json()
   },
 
-  async rateAnswer(answerId: string, rating: number): Promise<void> {
+  async rateAnswer(sessionId: string, answerId: string, rating: number): Promise<void> {
     const headers = await authHeaders()
-    await fetch(`${CHAT_API_BASE}/api/chat-sessions/${encodeURIComponent(answerId)}/answer-rating`, {
+    await fetch(`${CHAT_API_BASE}/api/chat-sessions/answer-rating/${encodeURIComponent(sessionId)}`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ rating })
+      body: JSON.stringify({ answerId, rating })
     })
   }
 }

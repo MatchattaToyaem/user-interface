@@ -607,7 +607,9 @@ function syncPreviewFileFromCurrentChat() {
 }
 
 function handleRateAnswer(answerId: string, rating: number) {
-  chatSessionService.rateAnswer(answerId, rating)
+  const sessionId = currentChat.value?.sessionId
+  if (!sessionId) return
+  chatSessionService.rateAnswer(sessionId, answerId, rating)
 }
 
 function maybeAttachComparisonPrompt(targetMessage: Message) {
