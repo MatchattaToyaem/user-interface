@@ -110,6 +110,15 @@
                 </template>
               </div>
 
+              <button
+                v-if="isTypingMessage(message)"
+                class="skip-animation-btn"
+                @click.stop="$emit('skip-animation')"
+                type="button"
+              >
+                ⏩ Skip
+              </button>
+
               <div
                 v-if="
                   message.documents &&
@@ -157,8 +166,8 @@
               type="button"
               title="Read aloud"
             >
-              🔊
-              <span>{{ speakingMessageId === message.id ? 'Reading...' : 'Read Aloud' }}</span>
+              {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
+              <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
             </button>
           </div>
 
@@ -177,8 +186,8 @@
               type="button"
               title="Read aloud"
             >
-              🔊
-              <span>{{ speakingMessageId === message.id ? 'Reading...' : 'Read Aloud' }}</span>
+              {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
+              <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
             </button>
           </div>
 
@@ -287,6 +296,7 @@ const emit = defineEmits<{
   (e: 'open-document', document: MessageDocument): void
   (e: 'scroll-state', isNearBottom: boolean): void
   (e: 'three-perfect-ratings'): void
+  (e: 'skip-animation'): void
 }>()
 
 const chatBodyRef = ref<HTMLElement | null>(null)
@@ -417,6 +427,12 @@ function copyResponseText(messageId: number) {
 }
 
 function readResponseAloud(message: Message) {
+  if (speakingMessageId.value === message.id) {
+    window.speechSynthesis.cancel()
+    speakingMessageId.value = null
+    return
+  }
+
   if (!message.text) return
 
   window.speechSynthesis.cancel()
@@ -851,6 +867,25 @@ function readResponseAloud(message: Message) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.skip-animation-btn {
+  margin-top: 10px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #8792aa;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.skip-animation-btn:hover {
+  color: #ffffff;
+  border-color: rgba(77, 163, 255, 0.35);
+  background: rgba(19, 135, 255, 0.08);
 }
 
 .assistant-document-links {

@@ -85,6 +85,7 @@ let isDeleting = false
 let typeTimeout: number | null = null
 let typingIntervalId: number | null = null
 let responseTimeoutId: number | null = null
+let skipCurrentTyping: (() => void) | null = null
 
 const activeTypingIntervals = new Set<number>()
 const assistantReplyCount = ref(0)
@@ -239,11 +240,27 @@ function typeAssistantMessage(
         typingIntervalId = null
       }
 
+      skipCurrentTyping = null
       complete()
     }
   }, typingSpeed)
 
   activeTypingIntervals.add(typingIntervalId)
+
+  skipCurrentTyping = () => {
+    if (typingIntervalId !== null) {
+      clearInterval(typingIntervalId)
+      activeTypingIntervals.delete(typingIntervalId)
+      typingIntervalId = null
+    }
+    skipCurrentTyping = null
+    done(fullText)
+    complete()
+  }
+}
+
+function handleSkipAnimation() {
+  skipCurrentTyping?.()
 }
 
 // Handles real AI responses from the WebSocket (from the current branch)
@@ -701,6 +718,7 @@ function stopGeneration() {
     }
   }
 
+  skipCurrentTyping = null
   isGenerating.value = false
   generatingMessageId.value = null
   thinkingMessageId.value = null
@@ -944,6 +962,7 @@ onBeforeUnmount(() => {
             @open-document="openDocumentFromMessage"
             @scroll-state="handleChatScrollState"
             @three-perfect-ratings="triggerFireworks"
+            @skip-animation="handleSkipAnimation"
           />
 
         <div :class="{ introInput: showIntro }">
