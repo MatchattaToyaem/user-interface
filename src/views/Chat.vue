@@ -606,9 +606,10 @@ function syncPreviewFileFromCurrentChat() {
   syncPreviewFileFromChat(currentChat.value)
 }
 
-function handleRateAnswer(answerId: string, rating: number) {
+function handleRateAnswer(answerId: string | null, rating: number) {
+  console.log('Rating answer', { answerId, rating })
   const sessionId = currentChat.value?.sessionId
-  if (!sessionId) return
+  if (!sessionId || !answerId) return
   chatSessionService.rateAnswer(sessionId, answerId, rating)
 }
 

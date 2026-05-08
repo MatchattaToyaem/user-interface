@@ -109,7 +109,7 @@
                 @click.stop="$emit('skip-animation')"
                 type="button"
               >
-                ⏩ Skip
+                Skip
               </button>
 
               <div
@@ -292,7 +292,7 @@ const emit = defineEmits<{
   (e: 'scroll-state', isNearBottom: boolean): void
   (e: 'three-perfect-ratings'): void
   (e: 'skip-animation'): void
-  (e: 'rate-answer', answerId: string, rating: number): void
+  (e: 'rate-answer', answerId: string | null, rating: number): void
 }>()
 
 const chatBodyRef = ref<HTMLElement | null>(null)
@@ -398,9 +398,7 @@ function selectRating(messageId: number, rating: number) {
   }, 900)
 
   const message = props.currentChat?.messages.find(msg => msg.id === messageId)
-  if (message?.answerId) {
-    emit('rate-answer', message.answerId, rating)
-  }
+  emit('rate-answer', message?.answerId ?? null, rating)
 
   if (consecutiveFiveStarCount.value >= 3) {
     emit('three-perfect-ratings')
