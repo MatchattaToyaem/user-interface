@@ -359,7 +359,7 @@ watch(
 )
 
 watch(
-  () => props.currentChat?.id,
+  () => props.currentChat?.messages.map(m => m.id).join(','),
   () => {
     if (!props.currentChat) return
     for (const message of props.currentChat.messages) {
