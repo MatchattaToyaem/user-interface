@@ -285,7 +285,7 @@ function handleWsMessage(response: MessageResponse) {
     role: 'assistant',
     text: '',
     documents: sourceDocuments.length ? sourceDocuments : undefined,
-    answerId: response.answerId
+    answerId: response.answer_id ?? response.answerId
   }
 
   if (thinkingIndex !== -1) {
@@ -367,6 +367,7 @@ async function selectChatById(chatId: number) {
         : session.chatHistory
 
     for (const entry of history) {
+      console.log('[history] answerId:', entry.answerId)
       chat.messages.push({
         id: nextMessageId++,
         role: 'user',
@@ -608,7 +609,6 @@ function syncPreviewFileFromCurrentChat() {
 }
 
 function handleRateAnswer(answerId: string | null, rating: number) {
-  console.log('Rating answer', { answerId, rating })
   const sessionId = currentChat.value?.sessionId
   if (!sessionId || !answerId) return
   chatSessionService.rateAnswer(sessionId, answerId, rating)
