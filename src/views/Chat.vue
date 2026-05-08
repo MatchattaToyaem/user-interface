@@ -956,6 +956,7 @@ onBeforeUnmount(() => {
       </div>
     </main>
   </div>
+  </LightTheme>
 </template>
 
 <style scoped>
