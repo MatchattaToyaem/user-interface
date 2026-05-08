@@ -16,6 +16,7 @@ export interface ChatSessionResponse {
 export interface ChatHistoryEntry {
   question: string
   answer: string
+  answerId?: string
   sources?: SourceRef[]
   document_reference_id: string
   response_time: string

@@ -383,7 +383,8 @@ async function selectChatById(chatId: number) {
         id: nextMessageId++,
         role: 'assistant',
         text: entry.answer,
-        documents: sourceDocuments.length ? sourceDocuments : undefined
+        documents: sourceDocuments.length ? sourceDocuments : undefined,
+        answerId: entry.answerId
       })
     }
   } catch {
