@@ -207,8 +207,9 @@
                   active: star <= displayRating(message.id),
                   locked: star <= selectedRating(message.id)
                 }"
-                @mouseenter="setHoverRating(message.id, star)"
-                @mouseleave="clearHoverRating(message.id)"
+                :disabled="!!selectedRating(message.id)"
+                @mouseenter="!selectedRating(message.id) && setHoverRating(message.id, star)"
+                @mouseleave="!selectedRating(message.id) && clearHoverRating(message.id)"
                 @click="selectRating(message.id, star)"
                 type="button"
               >
@@ -1051,6 +1052,10 @@ function readResponseAloud(message: Message) {
 
 .star-btn.locked {
   animation: starPop 0.3s ease;
+}
+
+.star-btn:disabled {
+  cursor: default;
 }
 
 .rating-reaction {
