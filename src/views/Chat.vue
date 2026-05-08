@@ -3,23 +3,26 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
-
-import LightTheme from '@/components/LightTheme.vue'
-import Intro from '@/components/Intro.vue'
-import ChatSidebar from '@/components/ChatSidebar.vue'
-import ChatTopbar from '@/components/ChatTopbar.vue'
+import { chatSessionService, type ChatHistoryEntry } from '@/services/chatSessionService'
+import { useChatService } from '@/services/websocketService'
+import type { MessageResponse } from '@/models/messageResponse'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import ChatSidebar from '@/components/ChatSidebar.vue'
+import ChatTopbar from '@/components/ChatTopbar.vue'
+import LightTheme from '@/components/LightTheme.vue'
+import Intro from '@/components/Intro.vue'
 import ThemeEffects from '@/components/ThemeEffects.vue'
-
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
+import docLogo from '@/assets/doc-logo.png'
 
 type MessageDocument = {
   id: string
   name: string
-  file: File
+  documentPath?: string
+  file?: File
 }
 
 type MessageRole = 'user' | 'assistant' | 'thinking' | 'comparison_result'
@@ -31,10 +34,14 @@ type Message = {
   fileNames?: string[]
   docReference?: string
   documents?: MessageDocument[]
+  compared?: boolean
+  comparisonOptions?: { left: string; right: string }
+  chosenOption?: 'left' | 'right' | null
 }
 
 type ChatItem = {
   id: number
+  sessionId: string
   name: string
   messages: Message[]
   selectedDocumentId?: string | null
@@ -43,51 +50,58 @@ type ChatItem = {
 const router = useRouter()
 const userStore = useUserStore()
 
+const activeMode = ref<'chat' | 'doc'>('chat')
 const showIntro = ref(true)
-const isConnected = ref(false)
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
 
 const isLightTheme = ref(false)
-
 const themeTransition = ref<'light-wipe' | 'dark-wipe' | null>(null)
-
 const showFireworks = ref(false)
 
 const inputValue = ref('')
 const searchQuery = ref('')
 
 const openMenuChatId = ref<number | null>(null)
-
 const editingChatId = ref<number | null>(null)
 const editingChatName = ref('')
 
 const animatedText = ref('')
-
-const isGenerating = ref(false)
-const generatingMessageId = ref<number | null>(null)
-const thinkingMessageId = ref<number | null>(null)
-
-const isChatNearBottom = ref(true)
-
 const typingSpeed = 18
 
-let typingIntervalId: number | null = null
-let responseTimeoutId: number | null = null
-
-const phrases = [
-  'Ask about specific projects',
-  'Troubleshoot a problem',
-  'Ask a question'
+const comparisonPromptProbability = 0.3
+const comparisonLabels = [
+  { left: 'Response A', right: 'Response B' },
+  { left: 'Version 1', right: 'Version 2' },
+  { left: 'Option A', right: 'Option B' }
 ]
+
+const phrases = ['Ask about specific projects', 'Troubleshoot a problem', 'Ask a question']
 
 let phraseIndex = 0
 let charIndex = 0
 let isDeleting = false
 let typeTimeout: number | null = null
+let typingIntervalId: number | null = null
+let responseTimeoutId: number | null = null
 
 const activeTypingIntervals = new Set<number>()
+const assistantReplyCount = ref(0)
+const isGenerating = ref(false)
+const isDocLoading = ref(false)
+const isDocViewerOpen = ref(false)
+const generatingMessageId = ref<number | null>(null)
+const thinkingMessageId = ref<number | null>(null)
+const previewFile = ref<File | null>(null)
+const previewFileUrl = ref('')
+const previewFileName = ref('')
+const isChatNearBottom = ref(true)
+const docLoadToken = ref(0)
+const documentServiceUrl = import.meta.env.VITE_DOCUMENT_SERVICE_URL || 'http://localhost:8083'
+
+// Real WebSocket connection from the current branch
+const { isConnected, connect, disconnect, sendMessage: wsSendMessage } = useChatService(handleWsMessage)
 
 const displayName = computed(() => {
   const fullName = userStore.account?.name?.trim() || 'User'
@@ -112,17 +126,9 @@ const userPhoto = computed(() => {
   return (userStore as any).account?.idTokenClaims?.picture || ''
 })
 
-const chats = ref<ChatItem[]>([
-  {
-    id: 1,
-    name: 'New Chat',
-    messages: [],
-    selectedDocumentId: null
-  }
-])
+const chats = ref<ChatItem[]>([])
 
 const selectedChatId = ref(1)
-
 let nextChatId = 2
 let nextMessageId = 1
 
@@ -149,6 +155,39 @@ const selectedChatName = computed(() => {
 
 const showWelcome = computed(() => {
   return !!currentChat.value && currentChat.value.messages.length === 0
+})
+
+const supportedPreviewText = computed(() => {
+  return 'PDF, Word and Excel previews are supported'
+})
+
+const currentPreviewFileName = computed(() => {
+  return previewFile.value?.name || previewFileName.value || 'No document selected'
+})
+
+const isPdfPreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return !!name && name.endsWith('.pdf')
+})
+
+const isImagePreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')
+})
+
+const isWordPreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.doc') || name.endsWith('.docx')
+})
+
+const isExcelPreview = computed(() => {
+  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
+  return name.endsWith('.xls') || name.endsWith('.xlsx') || name.endsWith('.csv')
+})
+
+const officeViewerUrl = computed(() => {
+  if (!previewFileUrl.value) return ''
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewFileUrl.value)}`
 })
 
 function typeLoop() {
@@ -207,6 +246,57 @@ function typeAssistantMessage(
   activeTypingIntervals.add(typingIntervalId)
 }
 
+// Handles real AI responses from the WebSocket (from the current branch)
+function handleWsMessage(response: MessageResponse) {
+  const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat) return
+
+  const thinkingIndex = selectedChat.messages.findIndex(
+    msg => msg.id === thinkingMessageId.value
+  )
+
+  const sourceDocuments: MessageDocument[] = (response.sources || []).map((s, index) => ({
+    id: `source-${s.chunk_id || index}-${Date.now()}`,
+    name: s.file,
+    documentPath: s.document_path
+  }))
+
+  const assistantMessage: Message = {
+    id: nextMessageId++,
+    role: 'assistant',
+    text: '',
+    documents: sourceDocuments.length ? sourceDocuments : undefined
+  }
+
+  if (thinkingIndex !== -1) {
+    selectedChat.messages.splice(thinkingIndex, 1, assistantMessage)
+  } else {
+    selectedChat.messages.push(assistantMessage)
+  }
+
+  generatingMessageId.value = assistantMessage.id
+
+  typeAssistantMessage(
+    response.message,
+    typed => {
+      const liveChat = chats.value.find(chat => chat.id === selectedChatId.value)
+      if (!liveChat) return
+
+      const liveMessage = liveChat.messages.find(msg => msg.id === assistantMessage.id)
+      if (!liveMessage) return
+
+      liveMessage.text = typed
+    },
+    () => {
+      isGenerating.value = false
+      generatingMessageId.value = null
+      thinkingMessageId.value = null
+      maybeAttachComparisonPrompt(assistantMessage)
+      syncPreviewFileFromCurrentChat()
+    }
+  )
+}
+
 function toggleSidebar() {
   isSidebarExpanded.value = !isSidebarExpanded.value
 }
@@ -240,9 +330,45 @@ function toggleMenu(chatId: number) {
     openMenuChatId.value === chatId ? null : chatId
 }
 
-function selectChatById(chatId: number) {
+async function selectChatById(chatId: number) {
   selectedChatId.value = chatId
   openMenuChatId.value = null
+
+  const chat = chats.value.find(c => c.id === chatId)
+  if (!chat || chat.messages.length > 0) return
+
+  const session = await chatSessionService.getSessionById(chat.sessionId)
+  if (!session || !session.chatHistory) return
+
+  try {
+    const history: ChatHistoryEntry[] =
+      typeof session.chatHistory === 'string'
+        ? JSON.parse(session.chatHistory)
+        : session.chatHistory
+
+    for (const entry of history) {
+      chat.messages.push({
+        id: nextMessageId++,
+        role: 'user',
+        text: entry.question
+      })
+
+      const sourceDocuments: MessageDocument[] = (entry.sources || []).map((s, index) => ({
+        id: `source-${s.chunk_id || index}-${Date.now()}`,
+        name: s.file,
+        documentPath: s.document_path
+      }))
+
+      chat.messages.push({
+        id: nextMessageId++,
+        role: 'assistant',
+        text: entry.answer,
+        documents: sourceDocuments.length ? sourceDocuments : undefined
+      })
+    }
+  } catch {
+    console.error('Failed to parse chat history')
+  }
 }
 
 function renameChat(chatId: number) {
@@ -261,36 +387,35 @@ function saveInlineRename(chatId: number) {
 
   if (!chat) return
 
-  if (editingChatName.value.trim()) {
+  if (editingChatName.value && editingChatName.value.trim()) {
     chat.name = editingChatName.value.trim()
   }
 
   editingChatId.value = null
   editingChatName.value = ''
 }
+
 function cancelInlineRename() {
   editingChatId.value = null
   editingChatName.value = ''
 }
 
-function deleteChat(chatId: number) {
-  if (chats.value.length === 1) {
-    chats.value[0] = {
-      id: chats.value[0].id,
-      name: 'New Chat',
-      messages: [],
-      selectedDocumentId: null
-    }
+async function deleteChat(chatId: number) {
+  const chat = chats.value.find(c => c.id === chatId)
+  if (chat) {
+    chatSessionService.deleteSession(chat.sessionId)
+  }
 
-    selectedChatId.value = chats.value[0].id
+  if (chats.value.length === 1) {
+    await startNewChat()
+    const oldIndex = chats.value.findIndex(c => c.id === chatId)
+    if (oldIndex !== -1) chats.value.splice(oldIndex, 1)
     openMenuChatId.value = null
     inputValue.value = ''
-
     return
   }
 
   const chatIndex = chats.value.findIndex(chat => chat.id === chatId)
-
   if (chatIndex === -1) return
 
   chats.value.splice(chatIndex, 1)
@@ -303,10 +428,19 @@ function deleteChat(chatId: number) {
   openMenuChatId.value = null
 }
 
-function startNewChat() {
+async function startNewChat() {
+  const userEmail = authService.getCurrentUser()?.email || userStore.account?.username || localStorage.getItem('userEmail') || 'anonymous'
+  const session = await chatSessionService.createSession({
+    chatName: 'New Chat',
+    userName: userEmail,
+    createdBy: userEmail,
+    status: 'active'
+  })
+
   const newChat: ChatItem = {
     id: nextChatId++,
-    name: 'New Chat',
+    sessionId: session?.id || crypto.randomUUID(),
+    name: session?.chatName || 'New Chat',
     messages: [],
     selectedDocumentId: null
   }
@@ -336,12 +470,191 @@ function getFileBadge(fileName: string) {
   return 'FILE'
 }
 
-function isDocumentSelected() {
-  return false
+function setPreviewFile(file: File) {
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+
+  previewFile.value = file
+  previewFileUrl.value = URL.createObjectURL(file)
 }
 
-function openDocumentFromMessage() {
-  return
+function clearPreviewFile() {
+  if (previewFileUrl.value) {
+    URL.revokeObjectURL(previewFileUrl.value)
+  }
+
+  previewFile.value = null
+  previewFileName.value = ''
+  previewFileUrl.value = ''
+}
+
+function createMessageDocuments(files: File[]): MessageDocument[] {
+  return files.map((file, index) => ({
+    id: `${file.name}-${file.lastModified}-${file.size}-${index}-${Date.now()}`,
+    name: file.name,
+    file
+  }))
+}
+
+async function fetchDocumentBlob(documentPath: string): Promise<string> {
+  const token = await authService.getToken()
+  const response = await fetch(
+    `${documentServiceUrl}/documents/file?path=${encodeURIComponent(documentPath)}`,
+    token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+  )
+  if (!response.ok) throw new Error(`Failed to fetch document: ${response.status}`)
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
+}
+
+async function loadDocumentPreview(document: MessageDocument) {
+  if (document.file) {
+    setPreviewFile(document.file)
+  } else if (document.documentPath) {
+    if (previewFileUrl.value) URL.revokeObjectURL(previewFileUrl.value)
+    previewFile.value = null
+    previewFileName.value = document.name
+    previewFileUrl.value = ''
+    try {
+      previewFileUrl.value = await fetchDocumentBlob(document.documentPath)
+    } catch (e) {
+      console.error('Failed to load document from document-service:', e)
+    }
+  }
+}
+
+function findDocumentByIdInChat(chat: ChatItem | null, documentId: string | null | undefined) {
+  if (!chat || !documentId) return null
+
+  for (const message of chat.messages) {
+    if (!message.documents || !message.documents.length) continue
+
+    const found = message.documents.find(document => document.id === documentId)
+    if (found) return found
+  }
+
+  return null
+}
+
+function findFirstDocumentInChat(chat: ChatItem | null) {
+  if (!chat) return null
+
+  for (const message of chat.messages) {
+    if (message.documents && message.documents.length) {
+      return message.documents[0]
+    }
+  }
+
+  return null
+}
+
+function syncPreviewFileFromChat(chat: ChatItem | null) {
+  if (!chat) {
+    clearPreviewFile()
+    return
+  }
+
+  const selectedDocument = findDocumentByIdInChat(chat, chat.selectedDocumentId)
+
+  if (selectedDocument) {
+    triggerDocLoading(320)
+    loadDocumentPreview(selectedDocument)
+    return
+  }
+
+  const firstDocument = findFirstDocumentInChat(chat)
+
+  if (firstDocument) {
+    chat.selectedDocumentId = firstDocument.id
+    triggerDocLoading(320)
+    loadDocumentPreview(firstDocument)
+    return
+  }
+
+  clearPreviewFile()
+}
+
+function triggerDocLoading(delayMs: number) {
+  isDocLoading.value = true
+  window.setTimeout(() => {
+    isDocLoading.value = false
+  }, delayMs)
+}
+
+function syncPreviewFileFromCurrentChat() {
+  syncPreviewFileFromChat(currentChat.value)
+}
+
+function maybeAttachComparisonPrompt(targetMessage: Message) {
+  assistantReplyCount.value++
+
+  if (assistantReplyCount.value <= 1) return
+
+  const shouldShow = Math.random() < comparisonPromptProbability
+  if (!shouldShow) return
+
+  const randomLabels =
+    comparisonLabels[Math.floor(Math.random() * comparisonLabels.length)]
+
+  targetMessage.compared = true
+  targetMessage.comparisonOptions = {
+    left: randomLabels.left,
+    right: randomLabels.right
+  }
+  targetMessage.chosenOption = null
+}
+
+function chooseComparisonOption(messageId: number, option: 'left' | 'right') {
+  const chat = currentChat.value
+  if (!chat) return
+
+  const targetIndex = chat.messages.findIndex(msg => msg.id === messageId)
+  if (targetIndex === -1) return
+
+  const target = chat.messages[targetIndex]
+  if (!target || !target.compared || !target.comparisonOptions) return
+
+  target.chosenOption = option
+
+  const selectedTitle =
+    option === 'left'
+      ? target.comparisonOptions.left
+      : target.comparisonOptions.right
+
+  window.setTimeout(() => {
+    chat.messages.splice(targetIndex + 1, 0, {
+      id: nextMessageId++,
+      role: 'comparison_result',
+      text: `You selected ${selectedTitle}. I understand. This is a sample response area where the chatbot answer will appear.`,
+      documents: target.documents,
+      fileNames: target.fileNames
+    })
+  }, 260)
+}
+
+function isDocumentSelected(documentId: string) {
+  const chat = currentChat.value
+  if (!chat) return false
+  return chat.selectedDocumentId === documentId
+}
+
+async function openDocumentFromMessage(document: MessageDocument) {
+  const chat = currentChat.value
+  if (chat) {
+    chat.selectedDocumentId = document.id
+  }
+
+  docLoadToken.value = Date.now()
+  isDocLoading.value = true
+  activeMode.value = 'doc'
+  isDocViewerOpen.value = true
+
+  try {
+    await loadDocumentPreview(document)
+  } finally {
+    isDocLoading.value = false
+  }
 }
 
 function handleChatScrollState(isNearBottom: boolean) {
@@ -393,10 +706,17 @@ function stopGeneration() {
   thinkingMessageId.value = null
 }
 
+// Sends the user message via real WebSocket (from the current branch)
 function sendMessage() {
   const text = inputValue.value.trim()
 
   if (!text || !currentChat.value || isGenerating.value) return
+
+  const userEmail =
+    authService.getCurrentUser()?.email ||
+    userStore.account?.username ||
+    localStorage.getItem('userEmail') ||
+    'anonymous'
 
   currentChat.value.messages.push({
     id: nextMessageId++,
@@ -426,58 +746,11 @@ function sendMessage() {
     text: ''
   })
 
-  responseTimeoutId = window.setTimeout(() => {
-    const selectedChat = chats.value.find(
-      chat => chat.id === selectedChatId.value
-    )
-
-    if (!selectedChat) return
-
-    const thinkingIndex = selectedChat.messages.findIndex(
-      msg => msg.id === newThinkingMessageId
-    )
-
-    if (thinkingIndex !== -1) {
-      const assistantMessage: Message = {
-        id: nextMessageId++,
-        role: 'assistant',
-        text: ''
-      }
-
-      generatingMessageId.value = assistantMessage.id
-
-      selectedChat.messages.splice(
-        thinkingIndex,
-        1,
-        assistantMessage
-      )
-
-      typeAssistantMessage(
-        'I understand. This is a sample response area where the chatbot answer will appear.',
-        typed => {
-          const liveChat = chats.value.find(
-            chat => chat.id === selectedChatId.value
-          )
-
-          if (!liveChat) return
-
-          const liveMessage = liveChat.messages.find(
-            msg => msg.id === assistantMessage.id
-          )
-
-          if (!liveMessage) return
-
-          liveMessage.text = typed
-        },
-        () => {
-          isGenerating.value = false
-          generatingMessageId.value = null
-          thinkingMessageId.value = null
-          responseTimeoutId = null
-        }
-      )
-    }
-  }, 1800)
+  wsSendMessage({
+    sessionId: currentChat.value.sessionId,
+    message: text,
+    sender: userEmail
+  })
 }
 
 function toggleTheme() {
@@ -513,10 +786,8 @@ async function handleLogout() {
   router.push('/login')
 }
 
-onMounted(() => {
-  window.setTimeout(() => {
-    isConnected.value = true
-  }, 1800)
+onMounted(async () => {
+  connect()
 
   window.setTimeout(() => {
     showIntro.value = false
@@ -536,13 +807,40 @@ onMounted(() => {
   window.addEventListener('click', closeMenuOutside)
 
   typeLoop()
+
+  const userEmail =
+    authService.getCurrentUser()?.email ||
+    userStore.account?.username ||
+    localStorage.getItem('userEmail') ||
+    'anonymous'
+
+  try {
+    const sessions = await chatSessionService.getSessionsByUser(userEmail)
+    if (sessions && sessions.length > 0) {
+      const sorted = [...sessions].sort(
+        (a, b) => new Date(b.lastAccess).getTime() - new Date(a.lastAccess).getTime()
+      )
+      for (const session of sorted) {
+        chats.value.push({
+          id: nextChatId++,
+          sessionId: session.id,
+          name: session.chatName || 'Chat',
+          messages: [],
+          selectedDocumentId: null
+        })
+      }
+      selectedChatId.value = chats.value[0].id
+      await selectChatById(chats.value[0].id)
+    } else {
+      await startNewChat()
+    }
+  } catch {
+    await startNewChat()
+  }
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener(
-    'click',
-    closeMenuOutside
-  )
+  window.removeEventListener('click', closeMenuOutside)
 
   if (typeTimeout !== null) {
     clearTimeout(typeTimeout)
@@ -561,6 +859,8 @@ onBeforeUnmount(() => {
   )
 
   activeTypingIntervals.clear()
+
+  disconnect()
 })
 </script>
 
@@ -646,33 +946,16 @@ onBeforeUnmount(() => {
             @three-perfect-ratings="triggerFireworks"
           />
 
-          <div :class="{ introInput: showIntro }">
-            <Transition name="reply-indicator">
-              <div
-                v-if="
-                  isGenerating &&
-                  !isChatNearBottom
-                "
-                class="floating-reply-indicator"
-              >
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </Transition>
-
-            <ChatInput
-              :input-value="inputValue"
-              :is-generating="isGenerating"
-              @update-input="inputValue = $event"
-              @send-message="sendMessage"
-              @stop-message="stopGeneration"
-            />
-          </div>
+        <div :class="{ introInput: showIntro }">
+          <ChatInput
+            :input-value="inputValue"
+            @update-input="inputValue = $event"
+            @send-message="sendMessage"
+          />
         </div>
-      </main>
-    </div>
-  </LightTheme>
+      </div>
+    </main>
+  </div>
 </template>
 
 <style scoped>

@@ -19,6 +19,15 @@
           />
         </div>
 
+        <button
+          v-if="previewFileUrl"
+          class="doc-topbar-btn doc-download-btn"
+          title="Download file"
+          @click="downloadFile"
+        >
+          ↓
+        </button>
+
         <button class="doc-topbar-btn" title="Expand" @click="openFullscreen">
           ⤢
         </button>
@@ -41,7 +50,7 @@
           </div>
         </template>
 
-        <template v-else-if="!previewFile">
+        <template v-else-if="!previewFile && !previewFileUrl && !isDocLoading">
           <div class="doc-empty-state">
             <div class="doc-empty-card">
               <div class="doc-empty-icon-wrap">
@@ -90,7 +99,14 @@
                   <div class="doc-generic-card">
                     <div class="doc-generic-badge">{{ getFileBadge(currentPreviewFileName) }}</div>
                     <h3>{{ currentPreviewFileName }}</h3>
-                    <p>Preview is not available for this file type yet.</p>
+                    <p>Preview is not available for this file type.</p>
+                    <button
+                      v-if="previewFileUrl"
+                      class="doc-download-action-btn"
+                      @click="downloadFile"
+                    >
+                      ↓ Download File
+                    </button>
                     <p class="doc-supported-text">{{ supportedPreviewText }}</p>
                   </div>
                 </div>
@@ -111,6 +127,15 @@
         </div>
 
         <div class="fullscreen-actions">
+          <button
+            v-if="previewFileUrl"
+            class="doc-topbar-btn doc-download-btn"
+            title="Download file"
+            @click="downloadFile"
+          >
+            ↓
+          </button>
+
           <button class="doc-topbar-btn" title="Exit Fullscreen" @click="closeFullscreen">
             ⤡
           </button>
@@ -143,7 +168,14 @@
           <div class="doc-generic-card">
             <div class="doc-generic-badge">{{ getFileBadge(currentPreviewFileName) }}</div>
             <h3>{{ currentPreviewFileName }}</h3>
-            <p>Preview is not available for this file type yet.</p>
+            <p>Preview is not available for this file type.</p>
+            <button
+              v-if="previewFileUrl"
+              class="doc-download-action-btn"
+              @click="downloadFile"
+            >
+              ↓ Download File
+            </button>
             <p class="doc-supported-text">{{ supportedPreviewText }}</p>
           </div>
         </div>
@@ -155,7 +187,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   isOpen: boolean
   currentChat: any
   previewFile: File | null
@@ -179,6 +211,16 @@ const emit = defineEmits<{
 }>()
 
 const isFullscreen = ref(false)
+
+function downloadFile() {
+  if (!props.previewFileUrl || !props.currentPreviewFileName) return
+  const a = document.createElement('a')
+  a.href = props.previewFileUrl
+  a.download = props.currentPreviewFileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
 
 function onSearchInput(event: Event) {
   const target = event.target as HTMLInputElement
@@ -323,6 +365,39 @@ function closeFromFullscreen() {
   background: rgba(255, 90, 90, 0.08);
   border-color: rgba(255, 90, 90, 0.22);
   box-shadow: 0 0 16px rgba(255, 90, 90, 0.14);
+}
+
+.doc-download-btn {
+  color: #7dd3fc;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.doc-download-btn:hover {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(125, 211, 252, 0.28);
+  box-shadow: 0 0 16px rgba(37, 99, 235, 0.22);
+}
+
+.doc-download-action-btn {
+  margin: 14px auto 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  background: rgba(37, 99, 235, 0.12);
+  color: #7dd3fc;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.22s ease;
+}
+
+.doc-download-action-btn:hover {
+  background: rgba(37, 99, 235, 0.22);
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.28);
 }
 
 .doc-viewer-body,

@@ -1,0 +1,59 @@
+location: australiaeast
+resourceGroup: ai-platform
+type: Microsoft.App/containerApps
+name: ui-interface-app
+properties:
+  environmentId: /subscriptions/53f34d3b-bdc7-4e68-89c4-0e4f1947eb31/resourceGroups/ai-platform/providers/Microsoft.App/managedEnvironments/managedEnvironment-aiplatform-8573
+  configuration:
+    registries:
+      - server: oconnoraiplatform.azurecr.io
+        username: oconnoraiplatform
+        passwordSecretRef: acr-password
+    secrets:
+      - name: acr-password
+        value: PLACEHOLDER_ACR
+    ingress:
+      external: true
+      targetPort: 80
+      transport: http
+      allowInsecure: false
+  template:
+    containers:
+      - name: ui-interface-app
+        image: oconnoraiplatform.azurecr.io/user-interface:latest
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        volumeMounts:
+          - volumeName: app-logs
+            mountPath: /var/log/app
+
+      - name: filebeat
+        image: oconnoraiplatform.azurecr.io/filebeat:v5
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        env:
+          - name: ELASTICSEARCH_HOST
+            value: "http://elasticsearch.internal.proudground-90080d26.australiaeast.azurecontainerapps.io:80"
+          - name: ELASTICSEARCH_USERNAME
+            value: "elastic"
+          - name: ELASTICSEARCH_PASSWORD
+            value: "KZjpxzuWoYx41YLhggNx"
+          - name: APP_SERVICE
+            value: "user-interface"
+          - name: INDEX_NAME
+            value: "ui-service"
+          - name: FILEBEAT_TYPE
+            value: "simple"
+        volumeMounts:
+          - volumeName: app-logs
+            mountPath: /var/log/app
+
+    volumes:
+      - name: app-logs
+        storageType: EmptyDir
+
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
