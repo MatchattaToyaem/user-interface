@@ -13,6 +13,7 @@ import ChatTopbar from '@/components/ChatTopbar.vue'
 import LightTheme from '@/components/LightTheme.vue'
 import Intro from '@/components/Intro.vue'
 import ThemeEffects from '@/components/ThemeEffects.vue'
+import DocViewer from '@/components/DocViewer.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
@@ -37,6 +38,7 @@ type Message = {
   compared?: boolean
   comparisonOptions?: { left: string; right: string }
   chosenOption?: 'left' | 'right' | null
+  answerId?: string
 }
 
 type ChatItem = {
@@ -282,7 +284,8 @@ function handleWsMessage(response: MessageResponse) {
     id: nextMessageId++,
     role: 'assistant',
     text: '',
-    documents: sourceDocuments.length ? sourceDocuments : undefined
+    documents: sourceDocuments.length ? sourceDocuments : undefined,
+    answerId: response.answerId
   }
 
   if (thinkingIndex !== -1) {
@@ -601,6 +604,10 @@ function triggerDocLoading(delayMs: number) {
 
 function syncPreviewFileFromCurrentChat() {
   syncPreviewFileFromChat(currentChat.value)
+}
+
+function handleRateAnswer(answerId: string, rating: number) {
+  chatSessionService.rateAnswer(answerId, rating)
 }
 
 function maybeAttachComparisonPrompt(targetMessage: Message) {
@@ -963,16 +970,37 @@ onBeforeUnmount(() => {
             @scroll-state="handleChatScrollState"
             @three-perfect-ratings="triggerFireworks"
             @skip-animation="handleSkipAnimation"
+            @rate-answer="handleRateAnswer"
           />
 
         <div :class="{ introInput: showIntro }">
           <ChatInput
             :input-value="inputValue"
+            :is-generating="isGenerating"
             @update-input="inputValue = $event"
             @send-message="sendMessage"
+            @stop-message="stopGeneration"
           />
         </div>
       </div>
+
+      <DocViewer
+        :is-open="isDocViewerOpen"
+        :current-chat="currentChat"
+        :preview-file="previewFile"
+        :preview-file-url="previewFileUrl"
+        :current-preview-file-name="currentPreviewFileName"
+        :is-doc-loading="isDocLoading"
+        :is-pdf-preview="isPdfPreview"
+        :is-word-preview="isWordPreview"
+        :is-excel-preview="isExcelPreview"
+        :is-image-preview="isImagePreview"
+        :office-viewer-url="officeViewerUrl"
+        :supported-preview-text="supportedPreviewText"
+        :doc-logo="docLogo"
+        :get-file-badge="getFileBadge"
+        @close="isDocViewerOpen = false"
+      />
     </main>
   </div>
   </LightTheme>

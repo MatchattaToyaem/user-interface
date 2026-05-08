@@ -12,4 +12,5 @@ export interface MessageResponse {
   confidence: number
   model: string
   sources: SourceRef[]
+  answerId?: string
 }

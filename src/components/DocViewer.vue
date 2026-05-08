@@ -9,16 +9,6 @@
           </span>
         </div>
 
-        <div class="doc-search-box">
-          <span class="doc-search-icon">⌕</span>
-          <input
-            :value="docSearchQuery"
-            type="text"
-            placeholder="Search document..."
-            @input="onSearchInput"
-          />
-        </div>
-
         <button
           v-if="previewFileUrl"
           class="doc-topbar-btn doc-download-btn"
@@ -193,7 +183,6 @@ const props = defineProps<{
   previewFile: File | null
   previewFileUrl: string
   currentPreviewFileName: string
-  docSearchQuery: string
   isDocLoading: boolean
   isPdfPreview: boolean
   isWordPreview: boolean
@@ -207,7 +196,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'update-search', value: string): void
 }>()
 
 const isFullscreen = ref(false)
@@ -220,11 +208,6 @@ function downloadFile() {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-}
-
-function onSearchInput(event: Event) {
-  const target = event.target as HTMLInputElement
-  emit('update-search', target.value)
 }
 
 function openFullscreen() {
@@ -310,35 +293,6 @@ function closeFromFullscreen() {
   text-overflow: ellipsis;
 }
 
-.doc-search-box {
-  flex: 1;
-  height: 40px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px;
-  background: rgba(14, 20, 35, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.doc-search-icon {
-  color: #77809a;
-  font-size: 14px;
-}
-
-.doc-search-box input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #d8def0;
-  font-size: 14px;
-}
-
-.doc-search-box input::placeholder {
-  color: #6d7488;
-}
 
 .doc-topbar-btn {
   width: 40px;

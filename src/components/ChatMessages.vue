@@ -89,21 +89,14 @@
               </div>
 
               <div v-if="message.text" class="formatted-answer">
-                <template
+                <div
                   v-if="
                     message.role === 'assistant' ||
                     message.role === 'comparison_result'
                   "
-                >
-                  <ul>
-                    <li
-                      v-for="point in formatBulletPoints(message.text)"
-                      :key="point"
-                    >
-                      {{ point }}
-                    </li>
-                  </ul>
-                </template>
+                  class="markdown-body"
+                  v-html="renderMarkdown(message.text)"
+                ></div>
 
                 <template v-else>
                   {{ message.text }}
@@ -270,6 +263,7 @@ type Message = {
   fileNames?: string[]
   docReference?: string
   documents?: MessageDocument[]
+  answerId?: string
 }
 
 type ChatItem = {
@@ -297,6 +291,7 @@ const emit = defineEmits<{
   (e: 'scroll-state', isNearBottom: boolean): void
   (e: 'three-perfect-ratings'): void
   (e: 'skip-animation'): void
+  (e: 'rate-answer', answerId: string, rating: number): void
 }>()
 
 const chatBodyRef = ref<HTMLElement | null>(null)
@@ -328,12 +323,6 @@ const consecutiveFiveStarCount = computed(() => {
   return count
 })
 
-function formatBulletPoints(text: string) {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map(point => point.trim())
-    .filter(point => point.length > 0)
-}
 
 function isTypingMessage(message: Message) {
   return message.role === 'assistant' && props.generatingMessageId === message.id
@@ -406,6 +395,11 @@ function selectRating(messageId: number, rating: number) {
       activeParticleMessageId.value = null
     }
   }, 900)
+
+  const message = props.currentChat?.messages.find(msg => msg.id === messageId)
+  if (message?.answerId) {
+    emit('rate-answer', message.answerId, rating)
+  }
 
   if (consecutiveFiveStarCount.value >= 3) {
     emit('three-perfect-ratings')
