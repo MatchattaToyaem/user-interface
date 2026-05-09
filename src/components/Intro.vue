@@ -77,9 +77,8 @@ defineProps<{
     0 0 90px rgba(47, 140, 255, 0.25);
   animation:
     logoFlyIn 1.8s cubic-bezier(0.18, 0.9, 0.25, 1.2) forwards,
-    logoPulseBeforeFade 0.8s ease-in-out forwards,
-    logoMergeToSidebar 0.75s cubic-bezier(0.18, 0.9, 0.25, 1.15) forwards;
-  animation-delay: 0s, 1.9s, 2.55s;
+    logoPulseBeforeFade 0.8s ease-in-out forwards;
+  animation-delay: 0s, 1.9s;
 }
 
 .intro-logo-wrap img {
@@ -152,9 +151,17 @@ defineProps<{
 }
 
 @keyframes screenFlash {
-  0% { opacity: 0; }
-  35% { opacity: 1; }
-  100% { opacity: 0; }
+  0% {
+    opacity: 0;
+  }
+
+  35% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes glowRipple {
@@ -227,18 +234,6 @@ defineProps<{
   }
 }
 
-@keyframes logoMergeToSidebar {
-  0% {
-    transform: translate(0, 0) scale(1);
-    opacity: 1;
-  }
-
-  100% {
-    transform: translate(calc(-50vw + 74px), calc(-50vh + 54px)) scale(0.38);
-    opacity: 0.15;
-  }
-}
-
 @keyframes particleBurst {
   0% {
     transform: translate(0, 0) scale(0.3);
@@ -256,8 +251,13 @@ defineProps<{
 }
 
 @keyframes cameraZoomIntro {
-  0% { transform: scale(1.08); }
-  100% { transform: scale(1); }
+  0% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1);
+  }
 }
 
 @keyframes introFadeOut {

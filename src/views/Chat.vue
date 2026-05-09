@@ -11,6 +11,7 @@ import ChatTopbar from '@/components/ChatTopbar.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import ThemeEffects from '@/components/ThemeEffects.vue'
+import AIPetModal from '@/components/AIPetModal.vue'
 
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
@@ -45,9 +46,11 @@ const userStore = useUserStore()
 
 const showIntro = ref(true)
 const isConnected = ref(false)
+const aiStatus = ref('Connecting...')
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
+const showAIPetModal = ref(false)
 
 const isLightTheme = ref(false)
 
@@ -214,7 +217,10 @@ function toggleSidebar() {
 function handleBrandButtonClick() {
   if (!isSidebarExpanded.value) {
     isSidebarExpanded.value = true
+    return
   }
+
+  showAIPetModal.value = true
 }
 
 async function expandAndFocusSearch() {
@@ -268,11 +274,15 @@ function saveInlineRename(chatId: number) {
   editingChatId.value = null
   editingChatName.value = ''
 }
+
+function updateAIStatus(status: string) {
+  aiStatus.value = status
+}
+
 function cancelInlineRename() {
   editingChatId.value = null
   editingChatName.value = ''
-}
-
+} 
 function deleteChat(chatId: number) {
   if (chats.value.length === 1) {
     chats.value[0] = {
@@ -391,6 +401,7 @@ function stopGeneration() {
   isGenerating.value = false
   generatingMessageId.value = null
   thinkingMessageId.value = null
+  updateAIStatus('Ready')
 }
 
 function sendMessage() {
@@ -415,6 +426,7 @@ function sendMessage() {
 
   isGenerating.value = true
   isChatNearBottom.value = true
+  updateAIStatus('Thinking...')
 
   const newThinkingMessageId = nextMessageId++
 
@@ -427,6 +439,7 @@ function sendMessage() {
   })
 
   responseTimeoutId = window.setTimeout(() => {
+    updateAIStatus('Searching documents...')
     const selectedChat = chats.value.find(
       chat => chat.id === selectedChatId.value
     )
@@ -452,6 +465,8 @@ function sendMessage() {
         assistantMessage
       )
 
+      updateAIStatus('Generating response...')
+
       typeAssistantMessage(
         'I understand. This is a sample response area where the chatbot answer will appear.',
         typed => {
@@ -470,6 +485,11 @@ function sendMessage() {
           liveMessage.text = typed
         },
         () => {
+          updateAIStatus('Memory updated')
+
+          window.setTimeout(() => {
+            updateAIStatus('Ready')
+          }, 1800)
           isGenerating.value = false
           generatingMessageId.value = null
           thinkingMessageId.value = null
@@ -516,6 +536,7 @@ async function handleLogout() {
 onMounted(() => {
   window.setTimeout(() => {
     isConnected.value = true
+    updateAIStatus('Ready to chat!')
   }, 1800)
 
   window.setTimeout(() => {
@@ -571,12 +592,16 @@ onBeforeUnmount(() => {
         :show-intro="showIntro"
         :main-logo="mainLogo"
         :sidebar-expanded="isSidebarExpanded"
-
       />
 
       <ThemeEffects
         :theme-transition="themeTransition"
         :show-fireworks="showFireworks"
+      />
+
+      <AIPetModal
+        :show="showAIPetModal"
+        @close="showAIPetModal = false"
       />
 
       <div
@@ -625,11 +650,12 @@ onBeforeUnmount(() => {
             :show-intro="showIntro"
             :is-connected="isConnected"
             :is-light-theme="isLightTheme"
+            :ai-status="aiStatus"
             @new-chat="startNewChat"
             @toggle-theme="toggleTheme"
           />
 
-          <ChatMessages
+                    <ChatMessages
             :class="{ introMessages: showIntro }"
             :current-chat="currentChat"
             :show-welcome="showWelcome"

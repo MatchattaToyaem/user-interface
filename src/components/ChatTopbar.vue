@@ -4,14 +4,13 @@
       <h1>Chatbot Assistant</h1>
 
       <transition name="fade-slide" mode="out-in">
-        <span v-if="isConnected" key="ready" class="status-pill ready">
-          <span class="status-dot ready-dot"></span>
-          Ready
-        </span>
-
-        <span v-else key="connecting" class="status-pill connecting">
-          <span class="status-dot connecting-dot"></span>
-          Connecting...
+        <span
+          :key="aiStatus"
+          class="status-pill"
+          :class="statusClass"
+        >
+          <span class="status-dot"></span>
+          {{ aiStatus }}
         </span>
       </transition>
     </div>
@@ -32,13 +31,20 @@
 
             <div class="cloud cloud-1"></div>
             <div class="cloud cloud-2"></div>
+            <div class="cloud cloud-3"></div>
+            <div class="cloud cloud-4"></div>
 
             <div class="hill hill-1"></div>
             <div class="hill hill-2"></div>
 
+            <span class="rabbit rabbit-1">🐇</span>
+            <span class="rabbit rabbit-2">🐇</span>
+            <span class="rabbit rabbit-3">🐇</span>
+
             <span class="flower flower-1">✿</span>
             <span class="flower flower-2">✿</span>
             <span class="flower flower-3">✿</span>
+            <span class="flower flower-4">✿</span>
           </div>
 
           <div v-else class="night-scene">
@@ -59,16 +65,31 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   showIntro: boolean
   isConnected: boolean
   isLightTheme: boolean
+  aiStatus: string
 }>()
 
 defineEmits<{
   (e: 'new-chat'): void
   (e: 'toggle-theme'): void
 }>()
+
+const statusClass = computed(() => {
+  const status = props.aiStatus.toLowerCase()
+
+  if (!props.isConnected) return 'connecting'
+  if (status.includes('thinking')) return 'thinking'
+  if (status.includes('searching')) return 'searching'
+  if (status.includes('generating')) return 'generating'
+  if (status.includes('memory')) return 'memory'
+
+  return 'ready'
+})
 </script>
 
 <style scoped>
@@ -103,37 +124,90 @@ defineEmits<{
   padding: 0 15px;
   border-radius: 999px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+  transition:
+    color 0.28s ease,
+    background 0.28s ease,
+    border-color 0.28s ease,
+    box-shadow 0.28s ease;
 }
 
-.ready {
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: statusPulse 1.45s infinite ease-in-out;
+}
+
+.status-pill.ready {
   color: #34d399;
   background: rgba(16, 185, 129, 0.11);
   border: 1px solid rgba(52, 211, 153, 0.26);
   box-shadow: 0 0 18px rgba(16, 185, 129, 0.08);
 }
 
-.connecting {
+.status-pill.ready .status-dot {
+  background: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.9);
+}
+
+.status-pill.connecting {
   color: #ff5b45;
   background: rgba(255, 91, 69, 0.08);
   border: 1px solid rgba(255, 91, 69, 0.22);
 }
 
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.ready-dot {
-  background: #10b981;
-  box-shadow: 0 0 9px rgba(16, 185, 129, 0.8);
-}
-
-.connecting-dot {
+.status-pill.connecting .status-dot {
   background: #ff5b45;
-  box-shadow: 0 0 10px rgba(255, 91, 69, 0.8);
-  animation: blink 1s infinite;
+  box-shadow: 0 0 10px rgba(255, 91, 69, 0.9);
+}
+
+.status-pill.thinking {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.09);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  box-shadow: 0 0 18px rgba(96, 165, 250, 0.1);
+}
+
+.status-pill.thinking .status-dot {
+  background: #60a5fa;
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.9);
+}
+
+.status-pill.searching {
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.09);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.1);
+}
+
+.status-pill.searching .status-dot {
+  background: #a855f7;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.9);
+}
+
+.status-pill.generating {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.09);
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  box-shadow: 0 0 18px rgba(250, 204, 21, 0.1);
+}
+
+.status-pill.generating .status-dot {
+  background: #facc15;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.9);
+}
+
+.status-pill.memory {
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.09);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  box-shadow: 0 0 18px rgba(45, 212, 191, 0.1);
+}
+
+.status-pill.memory .status-dot {
+  background: #2dd4bf;
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.9);
 }
 
 .topbar-actions {
@@ -191,7 +265,7 @@ defineEmits<{
 }
 
 .theme-toggle-btn:hover {
-  width: 290px;
+  width: 285px;
   transform: scale(1.02);
   box-shadow:
     0 0 28px rgba(47, 140, 255, 0.28),
@@ -219,7 +293,7 @@ defineEmits<{
 
 .sun-core {
   color: #ffd331;
-  font-size: 28px;
+  font-size: 26px;
   text-shadow:
     0 0 12px rgba(255, 211, 49, 0.9),
     0 0 28px rgba(255, 174, 0, 0.38);
@@ -239,7 +313,7 @@ defineEmits<{
 }
 
 .theme-toggle-btn:hover .sun-core {
-  left: 26px;
+  left: 27px;
 }
 
 .theme-toggle-btn:hover .moon-core {
@@ -249,7 +323,7 @@ defineEmits<{
 
 .theme-toggle-btn:hover .day-scene {
   background:
-    linear-gradient(180deg, #55afff 0%, #b9e9ff 48%, #77cf62 49%, #3f9f45 100%);
+    linear-gradient(180deg, #72b2ff 0%, #a9d4ff 44%, #7ac85c 45%, #4ca144 100%);
 }
 
 .theme-toggle-btn:hover .night-scene {
@@ -267,31 +341,69 @@ defineEmits<{
 
 .theme-toggle-btn:hover .cloud {
   opacity: 1;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.95);
   box-shadow:
-    20px 5px 0 rgba(255, 255, 255, 0.9),
-    42px -2px 0 rgba(255, 255, 255, 0.75);
-  animation: cloudPass 4s linear infinite;
+    14px 4px 0 rgba(255, 255, 255, 0.9),
+    28px -1px 0 rgba(255, 255, 255, 0.78);
+  animation: cloudPass 5s linear infinite;
+}
+
+.cloud::before,
+.cloud::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.cloud::before {
+  width: 16px;
+  height: 16px;
+  left: 7px;
+  top: -7px;
+}
+
+.cloud::after {
+  width: 19px;
+  height: 19px;
+  right: 5px;
+  top: -9px;
 }
 
 .cloud-1 {
-  width: 42px;
-  height: 16px;
-  top: 8px;
-  left: 80px;
+  width: 34px;
+  height: 13px;
+  top: 10px;
+  left: 75px;
 }
 
 .cloud-2 {
-  width: 50px;
-  height: 18px;
-  top: 17px;
-  left: 190px;
-  animation-delay: 1.2s !important;
+  width: 40px;
+  height: 14px;
+  top: 15px;
+  left: 150px;
+  animation-delay: 1s !important;
+}
+
+.cloud-3 {
+  width: 36px;
+  height: 13px;
+  top: 9px;
+  left: 215px;
+  animation-delay: 1.8s !important;
+}
+
+.cloud-4 {
+  width: 30px;
+  height: 11px;
+  top: 18px;
+  left: 245px;
+  animation-delay: 2.5s !important;
 }
 
 .hill {
   position: absolute;
-  bottom: -18px;
+  bottom: -22px;
   opacity: 0;
   border-radius: 50%;
 }
@@ -302,47 +414,89 @@ defineEmits<{
 
 .hill-1 {
   width: 170px;
-  height: 56px;
-  left: 35px;
-  background: #55b955;
+  height: 52px;
+  left: 24px;
+  background: #6fba55;
 }
 
 .hill-2 {
   width: 210px;
-  height: 64px;
-  left: 126px;
-  bottom: -25px;
-  background: #3f9f45;
+  height: 58px;
+  left: 116px;
+  bottom: -26px;
+  background: #4f9d45;
+}
+
+.rabbit {
+  position: absolute;
+  opacity: 0;
+  z-index: 9;
+  font-size: 20px;
+  bottom: 13px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.16));
+  transform-origin: bottom center;
+}
+
+.theme-toggle-btn:hover .rabbit {
+  opacity: 1;
+}
+
+.rabbit-1 {
+  left: 88px;
+  animation: rabbitHop 0.8s ease-in-out infinite;
+}
+
+.rabbit-2 {
+  left: 175px;
+  animation: rabbitHopFlip 0.85s ease-in-out infinite;
+  animation-delay: 0.15s;
+}
+
+.rabbit-3 {
+  left: 232px;
+  font-size: 18px;
+  animation: rabbitHop 0.95s ease-in-out infinite;
+  animation-delay: 0.3s;
 }
 
 .flower {
   position: absolute;
   opacity: 0;
   z-index: 8;
-  font-size: 16px;
-  animation: flowerSway 1.6s ease-in-out infinite;
+  font-size: 15px;
+  transform: scale(0.3);
 }
 
 .theme-toggle-btn:hover .flower {
   opacity: 1;
+  animation: flowerBloom 1.2s ease-in-out infinite alternate;
 }
 
 .flower-1 {
-  left: 104px;
-  bottom: 5px;
+  left: 126px;
+  bottom: 6px;
   color: #ff5faa;
 }
 
 .flower-2 {
-  left: 170px;
+  left: 205px;
   bottom: 8px;
   color: #fff176;
+  animation-delay: 0.18s !important;
 }
 
 .flower-3 {
-  left: 238px;
+  left: 260px;
   bottom: 6px;
   color: #ff9f43;
+  animation-delay: 0.3s !important;
+}
+
+.flower-4 {
+  left: 155px;
+  bottom: 5px;
+  color: #fff176;
+  animation-delay: 0.45s !important;
 }
 
 .theme-toggle-btn:hover .night-cloud {
@@ -426,13 +580,25 @@ defineEmits<{
   animation-delay: 2.5s;
 }
 
+@keyframes statusPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
 @keyframes cloudPass {
   from {
-    transform: translateX(-50px);
+    transform: translateX(-45px);
   }
 
   to {
-    transform: translateX(130px);
+    transform: translateX(75px);
   }
 }
 
@@ -446,13 +612,33 @@ defineEmits<{
   }
 }
 
-@keyframes flowerSway {
+@keyframes rabbitHop {
   0%, 100% {
-    transform: rotate(-5deg) translateY(0);
+    transform: translateY(0) rotate(0deg);
   }
 
-  50% {
-    transform: rotate(6deg) translateY(-2px);
+  45% {
+    transform: translateY(-9px) rotate(-4deg);
+  }
+}
+
+@keyframes rabbitHopFlip {
+  0%, 100% {
+    transform: scaleX(-1) translateY(0) rotate(0deg);
+  }
+
+  45% {
+    transform: scaleX(-1) translateY(-9px) rotate(4deg);
+  }
+}
+
+@keyframes flowerBloom {
+  0% {
+    transform: scale(0.45) rotate(-4deg);
+  }
+
+  100% {
+    transform: scale(1.1) rotate(6deg);
   }
 }
 
@@ -465,16 +651,6 @@ defineEmits<{
   50% {
     transform: scale(1.3);
     opacity: 1;
-  }
-}
-
-@keyframes blink {
-  0%, 100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.35;
   }
 }
 
@@ -505,6 +681,13 @@ defineEmits<{
 
   .theme-toggle-btn:hover {
     width: 210px;
+  }
+
+  .rabbit-3,
+  .flower-3,
+  .flower-4,
+  .cloud-4 {
+    display: none;
   }
 }
 </style>
