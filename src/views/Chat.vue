@@ -300,6 +300,8 @@ function handleWsMessage(response: MessageResponse) {
 
   generatingMessageId.value = assistantMessage.id
 
+  updateAIStatus('Responding...')
+
   typeAssistantMessage(
     response.message,
     typed => {
@@ -315,6 +317,7 @@ function handleWsMessage(response: MessageResponse) {
       isGenerating.value = false
       generatingMessageId.value = null
       thinkingMessageId.value = null
+      updateAIStatus('Ready')
       maybeAttachComparisonPrompt(assistantMessage)
       syncPreviewFileFromCurrentChat()
     }
