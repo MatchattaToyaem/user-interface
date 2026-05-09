@@ -28,208 +28,222 @@
         v-for="message in currentChat.messages"
         :key="message.id"
         class="message-row"
-        :class="message.role"
+        :class="[message.role, { interruptedRow: isInterruptedMessage(message) }]"
       >
-        <div
-          v-if="
-            message.role === 'assistant' ||
-            message.role === 'thinking' ||
-            message.role === 'comparison_result'
-          "
-          class="assistant-icon"
-          :class="{
-            thinkingIcon:
+        <template v-if="isInterruptedMessage(message)">
+          <div class="assistant-icon interrupted-avatar">
+            <img :src="mainLogo" alt="AI" />
+          </div>
+
+          <div class="interrupted-inline">
+            <span class="interrupted-line"></span>
+            <span class="interrupted-text">Response generation was interrupted</span>
+            <span class="interrupted-line"></span>
+          </div>
+        </template>
+
+        <template v-else>
+          <div
+            v-if="
+              message.role === 'assistant' ||
               message.role === 'thinking' ||
-              isTypingMessage(message)
-          }"
-        >
-          <div
-            v-if="message.role === 'thinking' || isTypingMessage(message)"
-            class="thinking-ring ring-1"
-          ></div>
-
-          <div
-            v-if="message.role === 'thinking' || isTypingMessage(message)"
-            class="thinking-ring ring-2"
-          ></div>
-
-          <img :src="mainLogo" alt="AI" />
-        </div>
-
-        <div class="assistant-message-stack">
-          <div
-            class="message-bubble"
+              message.role === 'comparison_result'
+            "
+            class="assistant-icon"
             :class="{
-              thinkingBubble: message.role === 'thinking',
-              comparisonResultBubble: message.role === 'comparison_result'
+              thinkingIcon:
+                message.role === 'thinking' ||
+                isTypingMessage(message)
             }"
           >
-            <template v-if="message.role === 'thinking'">
-              <div class="thinking-dots">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </template>
-
-            <template v-else>
-              <div
-                v-if="message.fileNames && message.fileNames.length"
-                class="message-file-chip-row"
-              >
-                <div
-                  v-for="fileName in message.fileNames"
-                  :key="fileName"
-                  class="message-file-chip"
-                  :class="{ userFileChip: message.role === 'user' }"
-                >
-                  <div class="file-badge">{{ getFileBadge(fileName) }}</div>
-                  <span class="message-file-name">{{ fileName }}</span>
-                </div>
-              </div>
-
-              <div v-if="message.text" class="formatted-answer">
-                <div
-                  v-if="
-                    message.role === 'assistant' ||
-                    message.role === 'comparison_result'
-                  "
-                  class="markdown-body"
-                  v-html="renderMarkdown(message.text)"
-                ></div>
-
-                <template v-else>
-                  {{ message.text }}
-                </template>
-              </div>
-
-              <button
-                v-if="isTypingMessage(message)"
-                class="skip-animation-btn"
-                @click.stop="$emit('skip-animation')"
-                type="button"
-              >
-                Skip
-              </button>
-
-              <div
-                v-if="
-                  message.documents &&
-                  message.documents.length &&
-                  (message.role === 'assistant' ||
-                    message.role === 'comparison_result')
-                "
-                class="assistant-document-links"
-              >
-                <button
-                  v-for="document in message.documents"
-                  :key="document.id"
-                  class="doc-reference-chip"
-                  :class="{ selected: isDocumentSelected(document.id) }"
-                  @click="$emit('open-document', document)"
-                >
-                  {{ document.name }}
-                </button>
-              </div>
-            </template>
-          </div>
-
-          <div
-            v-if="
-              (message.role === 'assistant' ||
-                message.role === 'comparison_result') &&
-              !isInterruptedMessage(message)
-            "
-            class="response-actions"
-          >
-            <button
-              class="response-action-btn"
-              @click="copyResponseText(message.id)"
-              type="button"
-              title="Copy response"
-            >
-              ⧉
-              <span>{{ copiedMessageId === message.id ? 'Copied' : 'Copy' }}</span>
-            </button>
-
-            <button
-              class="response-action-btn"
-              :class="{ speaking: speakingMessageId === message.id }"
-              @click="readResponseAloud(message)"
-              type="button"
-              title="Read aloud"
-            >
-              {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
-              <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
-            </button>
-          </div>
-
-          <div
-            v-if="
-              (message.role === 'assistant' ||
-                message.role === 'comparison_result') &&
-              isInterruptedMessage(message)
-            "
-            class="response-actions"
-          >
-            <button
-              class="response-action-btn"
-              :class="{ speaking: speakingMessageId === message.id }"
-              @click="readResponseAloud(message)"
-              type="button"
-              title="Read aloud"
-            >
-              {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
-              <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
-            </button>
-          </div>
-
-          <div
-            v-if="
-              (message.role === 'assistant' ||
-                message.role === 'comparison_result') &&
-              !isInterruptedMessage(message)
-            "
-            class="response-rating-card"
-            :class="{
-              happyRating: ratingMood(message.id) === 'happy',
-              sadRating: ratingMood(message.id) === 'sad'
-            }"
-          >
-            <span class="rating-label">Rate this response</span>
-
-            <div class="star-rating">
-              <button
-                v-for="star in 5"
-                :key="star"
-                class="star-btn"
-                :class="{
-                  active: star <= displayRating(message.id),
-                  locked: star <= selectedRating(message.id)
-                }"
-                :disabled="!!selectedRating(message.id)"
-                @mouseenter="!selectedRating(message.id) && setHoverRating(message.id, star)"
-                @mouseleave="!selectedRating(message.id) && clearHoverRating(message.id)"
-                @click="selectRating(message.id, star)"
-                type="button"
-              >
-                ★
-              </button>
-            </div>
-
-            <span v-if="selectedRating(message.id)" class="rating-reaction">
-              {{ selectedRating(message.id) >= 4 ? 'AI is happy ✨' : 'AI will improve 💙' }}
-            </span>
+            <div
+              v-if="message.role === 'thinking' || isTypingMessage(message)"
+              class="thinking-ring ring-1"
+            ></div>
 
             <div
-              v-if="activeParticleMessageId === message.id"
-              class="rating-particles"
-              :class="{ sadParticles: selectedRating(message.id) <= 3 }"
+              v-if="message.role === 'thinking' || isTypingMessage(message)"
+              class="thinking-ring ring-2"
+            ></div>
+
+            <img :src="mainLogo" alt="AI" />
+          </div>
+
+          <div class="assistant-message-stack">
+            <div
+              class="message-bubble"
+              :class="{
+                thinkingBubble: message.role === 'thinking',
+                comparisonResultBubble: message.role === 'comparison_result'
+              }"
             >
-              <span v-for="particle in 14" :key="particle"></span>
+              <template v-if="message.role === 'thinking'">
+                <div class="thinking-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </template>
+
+              <template v-else>
+                <div
+                  v-if="message.fileNames && message.fileNames.length"
+                  class="message-file-chip-row"
+                >
+                  <div
+                    v-for="fileName in message.fileNames"
+                    :key="fileName"
+                    class="message-file-chip"
+                    :class="{ userFileChip: message.role === 'user' }"
+                  >
+                    <div class="file-badge">{{ getFileBadge(fileName) }}</div>
+                    <span class="message-file-name">{{ fileName }}</span>
+                  </div>
+                </div>
+
+                <div v-if="message.text" class="formatted-answer">
+                  <div
+                    v-if="
+                      message.role === 'assistant' ||
+                      message.role === 'comparison_result'
+                    "
+                    class="markdown-body"
+                    v-html="renderMarkdown(message.text)"
+                  ></div>
+
+                  <template v-else>
+                    {{ message.text }}
+                  </template>
+                </div>
+
+                <button
+                  v-if="isTypingMessage(message)"
+                  class="skip-animation-btn"
+                  @click.stop="$emit('skip-animation')"
+                  type="button"
+                >
+                  Skip
+                </button>
+
+                <div
+                  v-if="
+                    message.documents &&
+                    message.documents.length &&
+                    (message.role === 'assistant' ||
+                      message.role === 'comparison_result')
+                  "
+                  class="assistant-document-links"
+                >
+                  <button
+                    v-for="document in message.documents"
+                    :key="document.id"
+                    class="doc-reference-chip"
+                    :class="{ selected: isDocumentSelected(document.id) }"
+                    @click="$emit('open-document', document)"
+                  >
+                    {{ document.name }}
+                  </button>
+                </div>
+              </template>
+            </div>
+
+            <div
+              v-if="
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result') &&
+                !isInterruptedMessage(message)
+              "
+              class="response-actions"
+            >
+              <button
+                class="response-action-btn"
+                @click="copyResponseText(message.id)"
+                type="button"
+                title="Copy response"
+              >
+                ⧉
+                <span>{{ copiedMessageId === message.id ? 'Copied' : 'Copy' }}</span>
+              </button>
+
+              <button
+                class="response-action-btn"
+                :class="{ speaking: speakingMessageId === message.id }"
+                @click="readResponseAloud(message)"
+                type="button"
+                title="Read aloud"
+              >
+                {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
+                <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
+              </button>
+            </div>
+
+            <div
+              v-if="
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result') &&
+                isInterruptedMessage(message)
+              "
+              class="response-actions"
+            >
+              <button
+                class="response-action-btn"
+                :class="{ speaking: speakingMessageId === message.id }"
+                @click="readResponseAloud(message)"
+                type="button"
+                title="Read aloud"
+              >
+                {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
+                <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
+              </button>
+            </div>
+
+            <div
+              v-if="
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result') &&
+                !isInterruptedMessage(message)
+              "
+              class="response-rating-card"
+              :class="{
+                happyRating: ratingMood(message.id) === 'happy',
+                sadRating: ratingMood(message.id) === 'sad'
+              }"
+            >
+              <span class="rating-label">Rate this response</span>
+
+              <div class="star-rating">
+                <button
+                  v-for="star in 5"
+                  :key="star"
+                  class="star-btn"
+                  :class="{
+                    active: star <= displayRating(message.id),
+                    locked: star <= selectedRating(message.id)
+                  }"
+                  :disabled="!!selectedRating(message.id)"
+                  @mouseenter="!selectedRating(message.id) && setHoverRating(message.id, star)"
+                  @mouseleave="!selectedRating(message.id) && clearHoverRating(message.id)"
+                  @click="selectRating(message.id, star)"
+                  type="button"
+                >
+                  ★
+                </button>
+              </div>
+
+              <span v-if="selectedRating(message.id)" class="rating-reaction">
+                {{ selectedRating(message.id) >= 4 ? 'AI is happy ✨' : 'AI will improve 💙' }}
+              </span>
+
+              <div
+                v-if="activeParticleMessageId === message.id"
+                class="rating-particles"
+                :class="{ sadParticles: selectedRating(message.id) <= 3 }"
+              >
+                <span v-for="particle in 14" :key="particle"></span>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
       </div>
     </div>
   </section>
@@ -304,11 +318,12 @@ const copiedMessageId = ref<number | null>(null)
 const speakingMessageId = ref<number | null>(null)
 
 const consecutiveFiveStarCount = computed(() => {
-  const assistantMessages = props.currentChat?.messages.filter(
-    message =>
-      (message.role === 'assistant' || message.role === 'comparison_result') &&
-      !isInterruptedMessage(message)
-  ) || []
+  const assistantMessages =
+    props.currentChat?.messages.filter(
+      message =>
+        (message.role === 'assistant' || message.role === 'comparison_result') &&
+        !isInterruptedMessage(message)
+    ) || []
 
   let count = 0
 
@@ -598,6 +613,42 @@ function readResponseAloud(message: Message) {
 .message-row.thinking,
 .message-row.comparison_result {
   justify-content: flex-start;
+}
+
+.message-row.interruptedRow {
+  justify-content: flex-start;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.interrupted-avatar {
+  margin-top: 0;
+  opacity: 0.96;
+}
+
+.interrupted-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 420px;
+  min-height: 32px;
+  animation: interruptedFadeIn 0.25s ease;
+}
+
+.interrupted-line {
+  width: 48px;
+  height: 1px;
+  flex: 0 0 48px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.interrupted-text {
+  color: rgba(185, 195, 220, 0.72);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  letter-spacing: 0.15px;
 }
 
 .assistant-message-stack {
@@ -1146,6 +1197,18 @@ function readResponseAloud(message: Message) {
   transform: translateY(10px);
 }
 
+@keyframes interruptedFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes heartbeatGlow {
   0% { transform: scale(0.9); opacity: 0.25; }
   25% { transform: scale(1.02); opacity: 0.45; }
@@ -1299,6 +1362,20 @@ function readResponseAloud(message: Message) {
 
   .response-actions {
     flex-wrap: wrap;
+  }
+
+  .interrupted-inline {
+    gap: 8px;
+    max-width: 320px;
+  }
+
+  .interrupted-line {
+    width: 28px;
+    flex: 0 0 28px;
+  }
+
+  .interrupted-text {
+    font-size: 12px;
   }
 }
 </style>

@@ -13,6 +13,7 @@ import ChatTopbar from '@/components/ChatTopbar.vue'
 import LightTheme from '@/components/LightTheme.vue'
 import Intro from '@/components/Intro.vue'
 import ThemeEffects from '@/components/ThemeEffects.vue'
+import AIPetModal from '@/components/AIPetModal.vue'
 import DocViewer from '@/components/DocViewer.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
@@ -55,9 +56,11 @@ const userStore = useUserStore()
 
 const activeMode = ref<'chat' | 'doc'>('chat')
 const showIntro = ref(true)
+const aiStatus = ref('Connecting...')
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
 const isLeavingPage = ref(false)
+const showAIPetModal = ref(false)
 
 const isLightTheme = ref(false)
 const themeTransition = ref<'light-wipe' | 'dark-wipe' | null>(null)
@@ -325,7 +328,10 @@ function toggleSidebar() {
 function handleBrandButtonClick() {
   if (!isSidebarExpanded.value) {
     isSidebarExpanded.value = true
+    return
   }
+
+  showAIPetModal.value = true
 }
 
 async function expandAndFocusSearch() {
@@ -416,6 +422,10 @@ function saveInlineRename(chatId: number) {
 
   editingChatId.value = null
   editingChatName.value = ''
+}
+
+function updateAIStatus(status: string) {
+  aiStatus.value = status
 }
 
 function cancelInlineRename() {
@@ -734,6 +744,7 @@ function stopGeneration() {
   isGenerating.value = false
   generatingMessageId.value = null
   thinkingMessageId.value = null
+  updateAIStatus('Ready')
 }
 
 // Sends the user message via real WebSocket (from the current branch)
@@ -765,6 +776,7 @@ function sendMessage() {
 
   isGenerating.value = true
   isChatNearBottom.value = true
+  updateAIStatus('Thinking...')
 
   const newThinkingMessageId = nextMessageId++
 
@@ -901,12 +913,16 @@ onBeforeUnmount(() => {
         :show-intro="showIntro"
         :main-logo="mainLogo"
         :sidebar-expanded="isSidebarExpanded"
-
       />
 
       <ThemeEffects
         :theme-transition="themeTransition"
         :show-fireworks="showFireworks"
+      />
+
+      <AIPetModal
+        :show="showAIPetModal"
+        @close="showAIPetModal = false"
       />
 
       <div
@@ -955,11 +971,12 @@ onBeforeUnmount(() => {
             :show-intro="showIntro"
             :is-connected="isConnected"
             :is-light-theme="isLightTheme"
+            :ai-status="aiStatus"
             @new-chat="startNewChat"
             @toggle-theme="toggleTheme"
           />
 
-          <ChatMessages
+                    <ChatMessages
             :class="{ introMessages: showIntro }"
             :current-chat="currentChat"
             :show-welcome="showWelcome"
