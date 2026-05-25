@@ -1,16 +1,28 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
+
 import ChatView from '@/views/Chat.vue'
-import LoginView from '@/views/Login.vue' // You'll need a login page too!
+import LoginView from '@/views/Login.vue'
+import DocumentLibraryView from '@/views/DocumentLibrary.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/',
+      redirect: '/chat'
+    },
+    {
+      path: '/chat',
       name: 'chat',
       component: ChatView,
-      meta: { requiresAuth: true } // Mark this as a protected page
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/documents',
+      name: 'documents',
+      component: DocumentLibraryView,
+      meta: { requiresAuth: true }
     },
     {
       path: '/login',
@@ -21,13 +33,20 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const userStore = useUserStore();
-  console.log('Navigation attempt to:', to.fullPath, 'Authenticated:', userStore.isAuthenticated);
+  const userStore = useUserStore()
+
+  console.log(
+    'Navigation attempt to:',
+    to.fullPath,
+    'Authenticated:',
+    userStore.isAuthenticated
+  )
+
   if (to.meta.requiresAuth && !userStore.isAuthenticated) {
-    next('/login');
+    next('/login')
   } else {
-    next();
+    next()
   }
-});
+})
 
 export default router

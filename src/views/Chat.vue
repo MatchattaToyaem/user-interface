@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
@@ -44,7 +44,7 @@ type ChatItem = {
 const router = useRouter()
 const userStore = useUserStore()
 
-const showIntro = ref(true)
+const showIntro = ref(false)
 const isConnected = ref(false)
 const aiStatus = ref('Connecting...')
 const isSidebarExpanded = ref(true)
@@ -98,7 +98,18 @@ const displayName = computed(() => {
 })
 
 const displayRole = computed(() => {
-  const email = userStore.account?.username?.toLowerCase() || ''
+  const account = userStore.account
+
+  const roles =
+    (account as any)?.idTokenClaims?.roles ||
+    (account as any)?.idTokenClaims?.extension_Role ||
+    (account as any)?.idTokenClaims?.role
+
+  if (Array.isArray(roles) && roles.length > 0) {
+    return roles[0]
+  }
+
+  const email = account?.username?.toLowerCase() || ''
 
   if (email.includes('student')) return 'Student'
   if (email.includes('staff')) return 'Staff'
@@ -124,6 +135,23 @@ const chats = ref<ChatItem[]>([
   }
 ])
 
+watch(
+  chats,
+  () => {
+    localStorage.setItem(
+      'chatSidebarList',
+      JSON.stringify(
+        chats.value.map(chat => ({
+          id: chat.id,
+          name: chat.name,
+          messages: [],
+          selectedDocumentId: chat.selectedDocumentId || null
+        }))
+      )
+    )
+  },
+  { deep: true, immediate: true }
+)
 const selectedChatId = ref(1)
 
 let nextChatId = 2
@@ -534,21 +562,28 @@ async function handleLogout() {
 }
 
 onMounted(() => {
+  const hasSeenIntro = sessionStorage.getItem('seenIntro')
+
+  if (!hasSeenIntro) {
+    showIntro.value = true
+    sessionStorage.setItem('seenIntro', 'true')
+
+    window.setTimeout(() => {
+      showIntro.value = false
+    }, 3200)
+  } else {
+    showIntro.value = false
+  }
+
   window.setTimeout(() => {
     isConnected.value = true
     updateAIStatus('Ready to chat!')
   }, 1800)
 
   window.setTimeout(() => {
-    showIntro.value = false
-  }, 3200)
-
-  window.setTimeout(() => {
     const nav =
       navigator as Navigator & {
-        vibrate?: (
-          pattern: number | number[]
-        ) => boolean
+        vibrate?: (pattern: number | number[]) => boolean
       }
 
     nav.vibrate?.([30, 40, 30])
@@ -644,59 +679,61 @@ onBeforeUnmount(() => {
         @expand-search="expandAndFocusSearch"
       />
 
-      <main class="main-content">
-        <div class="chat-panel">
-          <ChatTopbar
-            :show-intro="showIntro"
-            :is-connected="isConnected"
-            :is-light-theme="isLightTheme"
-            :ai-status="aiStatus"
-            @new-chat="startNewChat"
-            @toggle-theme="toggleTheme"
-          />
-
-                    <ChatMessages
-            :class="{ introMessages: showIntro }"
-            :current-chat="currentChat"
-            :show-welcome="showWelcome"
-            :display-name="displayName"
-            :animated-text="animatedText"
-            :main-logo="mainLogo"
-            :ai-logo="mainLogo"
-            :is-document-selected="isDocumentSelected"
-            :get-file-badge="getFileBadge"
-            :generating-message-id="generatingMessageId"
-            @close-menu="openMenuChatId = null"
-            @open-document="openDocumentFromMessage"
-            @scroll-state="handleChatScrollState"
-            @three-perfect-ratings="triggerFireworks"
-          />
-
-          <div :class="{ introInput: showIntro }">
-            <Transition name="reply-indicator">
-              <div
-                v-if="
-                  isGenerating &&
-                  !isChatNearBottom
-                "
-                class="floating-reply-indicator"
-              >
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </Transition>
-
-            <ChatInput
-              :input-value="inputValue"
-              :is-generating="isGenerating"
-              @update-input="inputValue = $event"
-              @send-message="sendMessage"
-              @stop-message="stopGeneration"
+      <Transition name="content-fade" mode="out-in" appear>
+        <main class="main-content">
+          <div class="chat-panel">
+            <ChatTopbar
+              :show-intro="showIntro"
+              :is-connected="isConnected"
+              :is-light-theme="isLightTheme"
+              :ai-status="aiStatus"
+              @new-chat="startNewChat"
+              @toggle-theme="toggleTheme"
             />
+
+                      <ChatMessages
+              :class="{ introMessages: showIntro }"
+              :current-chat="currentChat"
+              :show-welcome="showWelcome"
+              :display-name="displayName"
+              :animated-text="animatedText"
+              :main-logo="mainLogo"
+              :ai-logo="mainLogo"
+              :is-document-selected="isDocumentSelected"
+              :get-file-badge="getFileBadge"
+              :generating-message-id="generatingMessageId"
+              @close-menu="openMenuChatId = null"
+              @open-document="openDocumentFromMessage"
+              @scroll-state="handleChatScrollState"
+              @three-perfect-ratings="triggerFireworks"
+            />
+
+            <div :class="{ introInput: showIntro }">
+              <Transition name="reply-indicator">
+                <div
+                  v-if="
+                    isGenerating &&
+                    !isChatNearBottom
+                  "
+                  class="floating-reply-indicator"
+                >
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </Transition>
+
+              <ChatInput
+                :input-value="inputValue"
+                :is-generating="isGenerating"
+                @update-input="inputValue = $event"
+                @send-message="sendMessage"
+                @stop-message="stopGeneration"
+              />
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </Transition>  
     </div>
   </LightTheme>
 </template>
@@ -839,6 +876,16 @@ onBeforeUnmount(() => {
     inputIntro 0.8s ease both;
 
   animation-delay: 2.9s;
+}
+
+.content-fade-enter-active,
+.content-fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.content-fade-enter-from,
+.content-fade-leave-to {
+  opacity: 0;
 }
 
 @keyframes floatingDotBounce {
