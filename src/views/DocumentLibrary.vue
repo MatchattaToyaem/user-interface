@@ -1,12 +1,15 @@
 <template>
   <LightTheme :is-light-theme="isLightTheme">
     <div class="document-shell">
+      <ThemeEffects
+        :theme-transition="themeTransition"
+        :show-fireworks="false"
+      />
 
-      <!-- SIDEBAR -->
       <ChatSidebar
         :show-intro="false"
         :is-sidebar-expanded="isSidebarExpanded"
-        :is-brand-hovered="false"
+        :is-brand-hovered="isBrandHovered"
         :main-logo="isLightTheme ? logoPng : mainLogo"
         :chat-logo="chatLogo"
         :search-query="sidebarSearchQuery"
@@ -20,45 +23,109 @@
         :display-role="displayRole"
         :user-initial="userInitial"
         :user-photo="userPhoto"
-        @select-chat="selectChatForDocuments"
+        @toggle-sidebar="toggleSidebar"
+        @brand-click="router.push('/chat')"
+        @brand-hover="isBrandHovered = $event"
         @update-search="sidebarSearchQuery = $event"
+        @search-enter="handleSearchEnter"
+        @select-chat="selectChatForDocuments"
+        @toggle-menu="toggleMenu"
+        @rename-chat="startRename"
+        @delete-chat="deleteChat"
+        @update-editing-name="editingChatName = $event"
+        @save-rename="saveRename"
+        @cancel-rename="cancelRename"
+        @new-chat="router.push('/chat')"
         @logout="handleLogout"
+        @expand-sidebar="isSidebarExpanded = true"
+        @expand-search="isSidebarExpanded = true"
       />
 
-      <!-- MAIN -->
       <main class="document-main">
-
-        <!-- HEADER -->
         <header class="document-header">
-          <h1>Document Library</h1>
-
-          <!-- THEME BUTTON -->
-          <button class="theme-btn" @click="toggleTheme">
-            {{ isLightTheme ? '🌙' : '☀' }}
-          </button>
-        </header>
-
-        <!-- CONTENT -->
-        <div class="document-content">
-
-          <!-- TOOLBAR -->
-          <div class="document-toolbar">
-            <input
-              v-model="searchQuery"
-              placeholder="Search documents..."
-            />
-
-            <button>Issue Type</button>
-            <button>Failed Date</button>
+          <div>
+            <h1>Document Library</h1>
           </div>
 
-          <!-- TABLE -->
-          <transition name="fade-slide" mode="out-in">
-            <div class="table-card" :key="selectedChatId">
+          <div class="header-actions">
+            <button
+              class="theme-toggle-btn"
+              :class="{ lightActive: isLightTheme }"
+              @click="toggleTheme"
+            >
+              <div class="theme-scene">
+                <div v-if="!isLightTheme" class="day-scene">
+                  <span class="sun-core">☀</span>
 
+                  <div class="cloud cloud-1"></div>
+                  <div class="cloud cloud-2"></div>
+                  <div class="cloud cloud-3"></div>
+                  <div class="cloud cloud-4"></div>
+
+                  <div class="hill hill-1"></div>
+                  <div class="hill hill-2"></div>
+
+                  <span class="rabbit rabbit-1">🐇</span>
+                  <span class="rabbit rabbit-2">🐇</span>
+                  <span class="rabbit rabbit-3">🐇</span>
+
+                  <span class="flower flower-1">✿</span>
+                  <span class="flower flower-2">✿</span>
+                  <span class="flower flower-3">✿</span>
+                  <span class="flower flower-4">✿</span>
+                </div>
+
+                <div v-else class="night-scene">
+                  <span class="moon-core">☾</span>
+
+                  <span class="star star-1">✦</span>
+                  <span class="star star-2">✦</span>
+                  <span class="star star-3">✦</span>
+                  <span class="star star-4">✦</span>
+
+                  <div class="night-cloud night-cloud-1"></div>
+                  <div class="night-cloud night-cloud-2"></div>
+                </div>
+              </div>
+            </button>
+          </div>
+        </header>
+
+        <div class="document-content">
+          <section class="document-toolbar">
+            <div class="document-search">
+              <span>⌕</span>
+
+              <input
+                v-model="documentSearchQuery"
+                type="text"
+                placeholder="Search unprocessed documents..."
+              />
+            </div>
+
+            <button class="filter-btn" type="button">
+              Issue Type
+            </button>
+
+            <button class="filter-btn" type="button">
+              Failed Date
+            </button>
+
+            <div class="view-buttons">
+              <button type="button">☷</button>
+              <button type="button">▦</button>
+            </div>
+          </section>
+
+          <Transition name="document-slide" mode="out-in">
+            <section
+              :key="selectedChatId"
+              class="table-card"
+            >
               <table>
                 <thead>
                   <tr>
+                    <th><input type="checkbox" /></th>
                     <th>DOCUMENT NAME</th>
                     <th>FILE TYPE</th>
                     <th>FAILED DATE</th>
@@ -68,103 +135,372 @@
                   </tr>
                 </thead>
 
-                <tbody v-if="filteredDocs.length">
+                <tbody v-if="filteredDocuments.length">
+                  <tr
+                    v-for="doc in filteredDocuments"
+                    :key="doc.id"
+                  >
+                    <td><input type="checkbox" /></td>
 
-                  <tr v-for="doc in filteredDocs" :key="doc.id">
+                    <td>
+                      <div class="doc-name">
+                        <div
+                          class="file-icon"
+                          :class="doc.extension.toLowerCase()"
+                        >
+                          {{ doc.extension }}
+                        </div>
 
-                    <td>{{ doc.name }}</td>
-                    <td>{{ doc.fileType }}</td>
-                    <td>{{ doc.date }}</td>
-                    <td>{{ doc.issue }}</td>
-                    <td>{{ doc.chat }}</td>
-
-                    <td class="actions">
-                      <button>↻</button>
-                      <button>⋮</button>
+                        <div>
+                          <strong>{{ doc.name }}</strong>
+                          <span>{{ doc.size }}</span>
+                        </div>
+                      </div>
                     </td>
 
-                  </tr>
+                    <td>
+                      <span class="tag primary">
+                        {{ doc.fileType }}
+                      </span>
+                    </td>
 
-                </tbody>
+                    <td>{{ doc.failedDate }}</td>
 
-                <!-- EMPTY -->
-                <tbody v-else>
-                  <tr>
-                    <td colspan="6">
-                      <div class="empty">
-                        <h3>No unprocessed documents</h3>
-                        <p>
-                          Files that cannot be indexed or processed will appear here.
-                        </p>
+                    <td>
+                      <span
+                        class="status"
+                        :class="doc.status.toLowerCase().replace(' ', '-')"
+                      >
+                        <span class="status-dot"></span>
+                        {{ doc.issue }}
+                      </span>
+                    </td>
+
+                    <td>{{ doc.sourceChat }}</td>
+
+                    <td>
+                      <div class="actions">
+                        <button type="button" title="Retry processing">
+                          ↻
+                        </button>
+
+                        <button type="button" title="View details">
+                          ▣
+                        </button>
+
+                        <button type="button" title="More options">
+                          ⋮
+                        </button>
                       </div>
                     </td>
                   </tr>
                 </tbody>
 
+                <tbody v-else>
+                  <tr>
+                    <td colspan="7">
+                      <div class="empty-state">
+                        <h3>No unprocessed documents</h3>
+
+                        <p>
+                          Files that cannot be indexed, parsed, or linked to the knowledge base will appear here for review.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
               </table>
 
-            </div>
-          </transition>
+              <footer class="table-footer">
+                <span>
+                  Showing {{ filteredDocuments.length }} of {{ selectedChatDocuments.length }} entries
+                </span>
 
+                <div class="pagination">
+                  <button disabled>Previous</button>
+                  <button class="active">1</button>
+                  <button>Next</button>
+                </div>
+              </footer>
+            </section>
+          </Transition>
         </div>
-
       </main>
     </div>
   </LightTheme>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
 
-import ChatSidebar from '@/components/ChatSidebar.vue'
 import LightTheme from '@/components/LightTheme.vue'
+import ThemeEffects from '@/components/ThemeEffects.vue'
+import ChatSidebar from '@/components/ChatSidebar.vue'
 
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
 
+type ChatItem = {
+  id: number
+  name: string
+  messages: unknown[]
+  selectedDocumentId?: string | null
+}
+
+type DocumentItem = {
+  id: string
+  chatId: number
+  name: string
+  size: string
+  fileType: string
+  failedDate: string
+  issue: string
+  sourceChat: string
+  status: 'Failed' | 'Unsupported' | 'Needs Review'
+  extension: string
+}
+
 const router = useRouter()
 const userStore = useUserStore()
 
 const isLightTheme = ref(false)
+const themeTransition = ref<'light-wipe' | 'dark-wipe' | null>(null)
+
 const isSidebarExpanded = ref(true)
+const isBrandHovered = ref(false)
 
 const sidebarSearchQuery = ref('')
 const selectedChatId = ref(1)
+const openMenuChatId = ref<number | null>(null)
+const editingChatId = ref<number | null>(null)
+const editingChatName = ref('')
 
-const searchQuery = ref('')
+const sidebarChats = ref<ChatItem[]>([
+  {
+    id: 1,
+    name: 'New Chat',
+    messages: [],
+    selectedDocumentId: null
+  }
+])
 
-const docs = ref([])
+const documentSearchQuery = ref('')
+const documents = ref<DocumentItem[]>([])
 
-const filteredDocs = computed(() => {
-  if (!searchQuery.value) return docs.value
+const displayName = computed(() => {
+  const fullName = userStore.account?.name?.trim() || 'User'
+  const cleanedName = fullName.replace(/\s*\([^)]*\)/g, '').trim()
 
-  return docs.value.filter((d: any) =>
-    d.name.toLowerCase().includes(searchQuery.value.toLowerCase())
+  return cleanedName.split(' ')[0] || 'User'
+})
+
+const displayRole = computed(() => {
+  const account = userStore.account
+  const fullName = account?.name || ''
+
+  const roleFromName = fullName.match(/\(([^)]+)\)/)?.[1]
+
+  if (roleFromName) {
+    return roleFromName
+  }
+
+  const roles =
+    (account as any)?.idTokenClaims?.roles ||
+    (account as any)?.idTokenClaims?.extension_Role ||
+    (account as any)?.idTokenClaims?.role
+
+  if (Array.isArray(roles) && roles.length > 0) {
+    return roles[0]
+  }
+
+  if (typeof roles === 'string' && roles.trim()) {
+    return roles
+  }
+
+  const email = account?.username?.toLowerCase() || ''
+
+  if (email.includes('student')) return 'Student'
+  if (email.includes('staff')) return 'Staff'
+  if (email.includes('admin')) return 'Admin'
+
+  return 'User'
+})
+
+const userInitial = computed(() => {
+  return displayName.value.charAt(0).toUpperCase()
+})
+
+const userPhoto = computed(() => {
+  return (userStore as any).account?.idTokenClaims?.picture || ''
+})
+
+const selectedChatName = computed(() => {
+  const chat = sidebarChats.value.find(item => item.id === selectedChatId.value)
+  return chat?.name || 'New Chat'
+})
+
+const filteredSidebarChats = computed(() => {
+  const query = sidebarSearchQuery.value.trim().toLowerCase()
+
+  if (!query) {
+    return sidebarChats.value
+  }
+
+  return sidebarChats.value.filter(chat =>
+    chat.name.toLowerCase().includes(query)
   )
 })
 
-const displayName = computed(() => userStore.account?.name?.split(' ')[0] || 'User')
-const displayRole = computed(() => {
-  const name = userStore.account?.name || ''
-  const match = name.match(/\((.*?)\)/)
-  return match ? match[1] : 'User'
+const selectedChatDocuments = computed(() => {
+  return documents.value.filter(doc => doc.chatId === selectedChatId.value)
 })
-const userInitial = computed(() => displayName.value[0])
-const userPhoto = computed(() => userStore.account?.photo || '')
 
-const selectedChatName = computed(() => 'New Chat')
-const filteredSidebarChats = computed(() => [])
+const filteredDocuments = computed(() => {
+  const query = documentSearchQuery.value.trim().toLowerCase()
 
-function toggleTheme() {
-  isLightTheme.value = !isLightTheme.value
+  if (!query) {
+    return selectedChatDocuments.value
+  }
+
+  return selectedChatDocuments.value.filter(doc =>
+    doc.name.toLowerCase().includes(query) ||
+    doc.fileType.toLowerCase().includes(query) ||
+    doc.issue.toLowerCase().includes(query) ||
+    doc.status.toLowerCase().includes(query) ||
+    doc.sourceChat.toLowerCase().includes(query)
+  )
+})
+
+function loadSidebarChats() {
+  const savedChats = localStorage.getItem('chatSidebarList')
+
+  if (!savedChats) return
+
+  try {
+    const parsedChats = JSON.parse(savedChats) as ChatItem[]
+
+    if (Array.isArray(parsedChats) && parsedChats.length > 0) {
+      sidebarChats.value = parsedChats
+      selectedChatId.value = parsedChats[0].id
+    }
+  } catch {
+    sidebarChats.value = [
+      {
+        id: 1,
+        name: 'New Chat',
+        messages: [],
+        selectedDocumentId: null
+      }
+    ]
+  }
 }
 
-function selectChatForDocuments(id: number) {
-  selectedChatId.value = id
+function loadGeneratedDocuments() {
+  const savedDocuments = localStorage.getItem('unprocessedDocuments')
+
+  if (!savedDocuments) return
+
+  try {
+    const parsedDocuments = JSON.parse(savedDocuments) as DocumentItem[]
+
+    if (Array.isArray(parsedDocuments)) {
+      documents.value = parsedDocuments
+    }
+  } catch {
+    documents.value = []
+  }
+}
+
+function toggleTheme() {
+  themeTransition.value =
+    isLightTheme.value
+      ? 'dark-wipe'
+      : 'light-wipe'
+
+  window.setTimeout(() => {
+    isLightTheme.value = !isLightTheme.value
+  }, 280)
+
+  window.setTimeout(() => {
+    themeTransition.value = null
+  }, 850)
+}
+
+function toggleSidebar() {
+  isSidebarExpanded.value = !isSidebarExpanded.value
+}
+
+function handleSearchEnter() {
+  const firstMatch = filteredSidebarChats.value[0]
+
+  if (firstMatch) {
+    selectChatForDocuments(firstMatch.id)
+  }
+}
+
+function selectChatForDocuments(chatId: number) {
+  selectedChatId.value = chatId
+  openMenuChatId.value = null
+  documentSearchQuery.value = ''
+}
+
+function toggleMenu(chatId: number) {
+  openMenuChatId.value =
+    openMenuChatId.value === chatId ? null : chatId
+}
+
+function startRename(chatId: number) {
+  const chat = sidebarChats.value.find(item => item.id === chatId)
+
+  if (!chat) return
+
+  editingChatId.value = chatId
+  editingChatName.value = chat.name
+  openMenuChatId.value = null
+}
+
+function saveRename(chatId: number) {
+  const chat = sidebarChats.value.find(item => item.id === chatId)
+
+  if (!chat) return
+
+  if (editingChatName.value.trim()) {
+    chat.name = editingChatName.value.trim()
+  }
+
+  localStorage.setItem(
+    'chatSidebarList',
+    JSON.stringify(sidebarChats.value)
+  )
+
+  editingChatId.value = null
+  editingChatName.value = ''
+}
+
+function cancelRename() {
+  editingChatId.value = null
+  editingChatName.value = ''
+}
+
+function deleteChat(chatId: number) {
+  if (sidebarChats.value.length === 1) return
+
+  sidebarChats.value = sidebarChats.value.filter(chat => chat.id !== chatId)
+
+  if (selectedChatId.value === chatId) {
+    selectedChatId.value = sidebarChats.value[0].id
+  }
+
+  localStorage.setItem(
+    'chatSidebarList',
+    JSON.stringify(sidebarChats.value)
+  )
+
+  openMenuChatId.value = null
 }
 
 async function handleLogout() {
@@ -173,117 +509,751 @@ async function handleLogout() {
 }
 
 onMounted(() => {
-  docs.value = []
+  loadSidebarChats()
+  loadGeneratedDocuments()
 })
 </script>
 
 <style scoped>
-
 .document-shell {
-  display: flex;
+  width: 100vw;
   height: 100vh;
-  background: #03050a;
+  display: flex;
+  overflow: hidden;
+  color: #ffffff;
+  font-family: 'Inter', sans-serif;
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(0, 102, 255, 0.05) 0%,
+      transparent 35%
+    ),
+    linear-gradient(
+      180deg,
+      #05070d 0%,
+      #03050a 100%
+    );
 }
 
 .document-main {
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(0, 102, 255, 0.05) 0%,
+      transparent 35%
+    ),
+    linear-gradient(
+      180deg,
+      #05070d 0%,
+      #03050a 100%
+    );
 }
 
 .document-header {
-  height: 80px;
+  height: 86px;
+  padding: 0 28px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: linear-gradient(90deg, rgba(11, 16, 30, 0.96), rgba(8, 12, 22, 0.78));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 
 .document-header h1 {
-  font-size: 20px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #f5f7ff;
 }
 
-.theme-btn {
-  background: none;
-  border: none;
-  font-size: 18px;
-  cursor: pointer;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .document-content {
-  padding: 16px 24px;
+  height: calc(100vh - 86px);
+  padding: 18px 28px 28px;
+  overflow: hidden;
 }
 
 .document-toolbar {
+  padding: 0 0 18px;
   display: flex;
+  align-items: center;
   gap: 10px;
-  margin-bottom: 12px;
 }
 
-.document-toolbar input {
-  width: 280px;
-  height: 36px;
-  border-radius: 10px;
-  background: #0f1420;
-  border: none;
-  padding: 0 10px;
-  color: white;
+.document-search {
+  width: 360px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(16, 20, 32, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
 }
 
-.document-toolbar button {
-  height: 36px;
-  padding: 0 12px;
-  border-radius: 10px;
-  background: #0f1420;
+.document-search span {
+  color: #8b93a8;
+}
+
+.document-search input {
+  width: 100%;
   border: none;
-  color: white;
+  outline: none;
+  background: transparent;
+  color: #d8def0;
+  font-size: 14px;
+}
+
+.filter-btn,
+.view-buttons button {
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(16, 20, 32, 0.88);
+  color: #dce3f5;
+  padding: 0 14px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.view-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
 }
 
 .table-card {
-  background: #0f1420;
-  border-radius: 12px;
+  height: calc(100vh - 160px);
+  border-radius: 16px;
+  background: rgba(16, 20, 32, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 0 22px rgba(47, 140, 255, 0.06),
+    inset 0 0 18px rgba(255, 255, 255, 0.025);
 }
 
 table {
   width: 100%;
+  border-collapse: collapse;
 }
 
 th {
+  height: 42px;
   text-align: left;
-  padding: 12px;
+  color: #9aa3b8;
   font-size: 11px;
-  color: #aaa;
+  font-weight: 850;
+  padding: 0 16px;
 }
 
 td {
-  padding: 12px;
-  border-top: 1px solid rgba(255,255,255,0.05);
+  height: 66px;
+  padding: 0 16px;
+  color: #b9c1d4;
+  font-size: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+tbody tr {
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+tbody tr:hover {
+  background: rgba(88, 128, 238, 0.045);
+}
+
+.doc-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.doc-name strong {
+  display: block;
+  color: #f4f7ff;
+  font-size: 13px;
+}
+
+.doc-name span {
+  color: #8f98ad;
+  font-size: 12px;
+}
+
+.file-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  background: rgba(88, 128, 238, 0.16);
+  color: #9ab4ff;
+}
+
+.file-icon.pdf {
+  background: rgba(220, 76, 76, 0.16);
+  color: #ff8b8b;
+}
+
+.file-icon.doc,
+.file-icon.docx {
+  background: rgba(70, 120, 255, 0.16);
+  color: #8fb0ff;
+}
+
+.file-icon.xls,
+.file-icon.xlsx {
+  background: rgba(44, 190, 95, 0.16);
+  color: #75e095;
+}
+
+.tag {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #aab3c8;
+  font-size: 10px;
+}
+
+.tag.primary {
+  background: rgba(98, 91, 255, 0.16);
+  color: #c3bdff;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status.failed {
+  color: #ff8b8b;
+}
+
+.status.failed .status-dot {
+  background: #ff6b6b;
+}
+
+.status.unsupported {
+  color: #ffa94d;
+}
+
+.status.unsupported .status-dot {
+  background: #ffa94d;
+}
+
+.status.needs-review {
+  color: #a78bfa;
+}
+
+.status.needs-review .status-dot {
+  background: #a78bfa;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .actions button {
-  margin-right: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(8, 11, 19, 0.55);
+  color: #aab3c8;
+  cursor: pointer;
 }
 
-.empty {
+.empty-state {
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-state h3 {
+  margin: 0 0 8px;
+  color: #f5f7ff;
+  font-size: 18px;
+}
+
+.empty-state p {
+  max-width: 620px;
+  margin: 0;
+  color: #9aa3b8;
+  font-size: 14px;
   text-align: center;
-  padding: 60px;
+  line-height: 1.6;
 }
 
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: 0.2s;
+.table-footer {
+  margin-top: auto;
+  height: 60px;
+  padding: 0 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #9aa3b8;
+  font-size: 12px;
 }
 
-.fade-slide-enter-from {
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pagination button {
+  min-width: 34px;
+  height: 31px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(8, 11, 19, 0.55);
+  color: #aab3c8;
+}
+
+.pagination button.active {
+  background: #6752e8;
+  color: white;
+}
+
+.pagination button:disabled {
+  opacity: 0.45;
+}
+
+.document-slide-enter-active,
+.document-slide-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+
+.document-slide-enter-from {
   opacity: 0;
-  transform: translateX(10px);
+  transform: translateX(12px);
 }
 
-.fade-slide-leave-to {
+.document-slide-leave-to {
   opacity: 0;
-  transform: translateX(-10px);
+  transform: translateX(-12px);
 }
 
+.theme-toggle-btn {
+  position: relative;
+  width: 50px;
+  height: 46px;
+  border-radius: 17px;
+  border: 1px solid rgba(47, 140, 255, 0.75);
+  background: #07111f;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 18px rgba(255, 255, 255, 0.04),
+    0 0 18px rgba(47, 140, 255, 0.16);
+  transition:
+    width 0.38s ease,
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    background 0.22s ease;
+}
+
+.theme-toggle-btn.lightActive {
+  background:
+    radial-gradient(circle at center, rgba(96, 165, 250, 0.18), transparent 68%),
+    linear-gradient(180deg, #ffffff, #eef4ff);
+  border-color: rgba(47, 140, 255, 0.72);
+  box-shadow:
+    0 0 18px rgba(47, 140, 255, 0.18),
+    inset 0 0 14px rgba(47, 140, 255, 0.08);
+}
+
+.theme-toggle-btn:hover {
+  width: 285px;
+  transform: scale(1.02);
+  box-shadow:
+    0 0 28px rgba(47, 140, 255, 0.28),
+    inset 0 0 18px rgba(255, 255, 255, 0.05);
+}
+
+.theme-scene,
+.day-scene,
+.night-scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.sun-core,
+.moon-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+  line-height: 1;
+}
+
+.sun-core {
+  color: #ffd331;
+  font-size: 26px;
+  text-shadow:
+    0 0 12px rgba(255, 211, 49, 0.9),
+    0 0 28px rgba(255, 174, 0, 0.38);
+}
+
+.moon-core {
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 700;
+  text-shadow:
+    0 0 10px rgba(255, 255, 255, 0.95),
+    0 0 22px rgba(147, 197, 253, 0.75),
+    0 0 42px rgba(96, 165, 250, 0.45);
+  filter:
+    drop-shadow(0 0 10px rgba(255, 255, 255, 0.9))
+    drop-shadow(0 0 24px rgba(96, 165, 250, 0.5));
+}
+
+.theme-toggle-btn:hover .sun-core {
+  left: 27px;
+}
+
+.theme-toggle-btn:hover .moon-core {
+  left: 32px;
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.theme-toggle-btn:hover .day-scene {
+  background:
+    linear-gradient(180deg, #72b2ff 0%, #a9d4ff 44%, #7ac85c 45%, #4ca144 100%);
+}
+
+.theme-toggle-btn:hover .night-scene {
+  background:
+    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.22), transparent 11%),
+    linear-gradient(180deg, #07123a 0%, #0a1d55 58%, #07111f 100%);
+}
+
+.cloud,
+.night-cloud {
+  position: absolute;
+  opacity: 0;
+  border-radius: 999px;
+}
+
+.theme-toggle-btn:hover .cloud {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    14px 4px 0 rgba(255, 255, 255, 0.9),
+    28px -1px 0 rgba(255, 255, 255, 0.78);
+  animation: cloudPass 5s linear infinite;
+}
+
+.cloud::before,
+.cloud::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.cloud::before {
+  width: 16px;
+  height: 16px;
+  left: 7px;
+  top: -7px;
+}
+
+.cloud::after {
+  width: 19px;
+  height: 19px;
+  right: 5px;
+  top: -9px;
+}
+
+.cloud-1 {
+  width: 34px;
+  height: 13px;
+  top: 10px;
+  left: 75px;
+}
+
+.cloud-2 {
+  width: 40px;
+  height: 14px;
+  top: 15px;
+  left: 150px;
+  animation-delay: 1s !important;
+}
+
+.cloud-3 {
+  width: 36px;
+  height: 13px;
+  top: 9px;
+  left: 215px;
+  animation-delay: 1.8s !important;
+}
+
+.cloud-4 {
+  width: 30px;
+  height: 11px;
+  top: 18px;
+  left: 245px;
+  animation-delay: 2.5s !important;
+}
+
+.hill {
+  position: absolute;
+  bottom: -22px;
+  opacity: 0;
+  border-radius: 50%;
+}
+
+.theme-toggle-btn:hover .hill {
+  opacity: 1;
+}
+
+.hill-1 {
+  width: 170px;
+  height: 52px;
+  left: 24px;
+  background: #6fba55;
+}
+
+.hill-2 {
+  width: 210px;
+  height: 58px;
+  left: 116px;
+  bottom: -26px;
+  background: #4f9d45;
+}
+
+.rabbit {
+  position: absolute;
+  opacity: 0;
+  z-index: 9;
+  font-size: 20px;
+  bottom: 13px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.16));
+  transform-origin: bottom center;
+}
+
+.theme-toggle-btn:hover .rabbit {
+  opacity: 1;
+}
+
+.rabbit-1 {
+  left: 88px;
+  animation: rabbitHop 0.8s ease-in-out infinite;
+}
+
+.rabbit-2 {
+  left: 175px;
+  animation: rabbitHopFlip 0.85s ease-in-out infinite;
+  animation-delay: 0.15s;
+}
+
+.rabbit-3 {
+  left: 232px;
+  font-size: 18px;
+  animation: rabbitHop 0.95s ease-in-out infinite;
+  animation-delay: 0.3s;
+}
+
+.flower {
+  position: absolute;
+  opacity: 0;
+  z-index: 8;
+  font-size: 15px;
+  transform: scale(0.3);
+}
+
+.theme-toggle-btn:hover .flower {
+  opacity: 1;
+  animation: flowerBloom 1.2s ease-in-out infinite alternate;
+}
+
+.flower-1 {
+  left: 126px;
+  bottom: 6px;
+  color: #ff5faa;
+}
+
+.flower-2 {
+  left: 205px;
+  bottom: 8px;
+  color: #fff176;
+  animation-delay: 0.18s !important;
+}
+
+.flower-3 {
+  left: 260px;
+  bottom: 6px;
+  color: #ff9f43;
+  animation-delay: 0.3s !important;
+}
+
+.flower-4 {
+  left: 155px;
+  bottom: 5px;
+  color: #fff176;
+  animation-delay: 0.45s !important;
+}
+
+.theme-toggle-btn:hover .night-cloud {
+  opacity: 1;
+  background: rgba(129, 140, 248, 0.24);
+  box-shadow:
+    28px 5px 0 rgba(129, 140, 248, 0.18),
+    56px -2px 0 rgba(129, 140, 248, 0.14);
+  animation: nightCloudDrift 5s linear infinite;
+}
+
+.night-cloud-1 {
+  width: 50px;
+  height: 16px;
+  bottom: 8px;
+  left: 105px;
+}
+
+.night-cloud-2 {
+  width: 64px;
+  height: 18px;
+  bottom: 14px;
+  left: 205px;
+}
+
+.star {
+  position: absolute;
+  opacity: 0;
+  color: #ffffff;
+  z-index: 7;
+  text-shadow:
+    0 0 8px rgba(255, 255, 255, 0.95),
+    0 0 18px rgba(147, 197, 253, 0.55);
+}
+
+.theme-toggle-btn:hover .star {
+  opacity: 1;
+  animation: starShimmer 1.35s ease-in-out infinite;
+}
+
+.star-1 {
+  left: 92px;
+  top: 8px;
+  font-size: 12px;
+}
+
+.star-2 {
+  left: 150px;
+  top: 22px;
+  font-size: 9px;
+  animation-delay: 0.3s !important;
+}
+
+.star-3 {
+  left: 205px;
+  top: 9px;
+  font-size: 14px;
+  animation-delay: 0.6s !important;
+}
+
+.star-4 {
+  left: 250px;
+  top: 24px;
+  font-size: 10px;
+  animation-delay: 0.9s !important;
+}
+
+@keyframes cloudPass {
+  from {
+    transform: translateX(-45px);
+  }
+
+  to {
+    transform: translateX(75px);
+  }
+}
+
+@keyframes nightCloudDrift {
+  from {
+    transform: translateX(80px);
+  }
+
+  to {
+    transform: translateX(-130px);
+  }
+}
+
+@keyframes rabbitHop {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+
+  45% {
+    transform: translateY(-9px) rotate(-4deg);
+  }
+}
+
+@keyframes rabbitHopFlip {
+  0%, 100% {
+    transform: scaleX(-1) translateY(0) rotate(0deg);
+  }
+
+  45% {
+    transform: scaleX(-1) translateY(-9px) rotate(4deg);
+  }
+}
+
+@keyframes flowerBloom {
+  0% {
+    transform: scale(0.45) rotate(-4deg);
+  }
+
+  100% {
+    transform: scale(1.1) rotate(6deg);
+  }
+}
+
+@keyframes starShimmer {
+  0%, 100% {
+    transform: scale(0.8);
+    opacity: 0.42;
+  }
+
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
 </style>

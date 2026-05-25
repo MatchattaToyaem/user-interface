@@ -144,7 +144,15 @@ const userPhoto = computed(() => {
   return (userStore as any).account?.idTokenClaims?.picture || ''
 })
 
-const chats = ref<ChatItem[]>([])
+const chats = ref<ChatItem[]>([
+  {
+    id: 1,
+    sessionId: 'local-session-1',
+    name: 'New Chat',
+    messages: [],
+    selectedDocumentId: null
+  }
+])
 
 watch(
   chats,
@@ -860,10 +868,11 @@ async function handleLogout() {
 }
 
 onMounted(() => {
-  window.setTimeout(() => {
-    isConnected.value = true
-    updateAIStatus('Ready to chat!')
-  }, 1800)
+  const hasSeenIntro = sessionStorage.getItem('seenIntro')
+
+  if (!hasSeenIntro) {
+    showIntro.value = true
+    sessionStorage.setItem('seenIntro', 'true')
 
     window.setTimeout(() => {
       showIntro.value = false
@@ -1032,33 +1041,36 @@ onBeforeUnmount(() => {
             @open-document="openDocumentFromMessage"
             @scroll-state="handleChatScrollState"
             @three-perfect-ratings="triggerFireworks"
+            @skip-animation="handleSkipAnimation"
+            @rate-answer="handleRateAnswer"
           />
 
-          <div :class="{ introInput: showIntro }">
-            <Transition name="reply-indicator">
-              <div
-                v-if="
-                  isGenerating &&
-                  !isChatNearBottom
-                "
-                class="floating-reply-indicator"
-              >
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </Transition>
+            <div :class="{ introInput: showIntro }">
+              <Transition name="reply-indicator">
+                <div
+                  v-if="
+                    isGenerating &&
+                    !isChatNearBottom
+                  "
+                  class="floating-reply-indicator"
+                >
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </Transition>
 
-            <ChatInput
-              :input-value="inputValue"
-              :is-generating="isGenerating"
-              @update-input="inputValue = $event"
-              @send-message="sendMessage"
-              @stop-message="stopGeneration"
-            />
+              <ChatInput
+                :input-value="inputValue"
+                :is-generating="isGenerating"
+                @update-input="inputValue = $event"
+                @send-message="sendMessage"
+                @stop-message="stopGeneration"
+              />
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </Transition>  
     </div>
   </LightTheme>
 </template>
