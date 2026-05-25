@@ -102,26 +102,28 @@
                 </div>
 
                 <div v-if="message.text" class="formatted-answer">
-                  <template
+                  <div
                     v-if="
                       message.role === 'assistant' ||
                       message.role === 'comparison_result'
                     "
-                  >
-                    <ul>
-                      <li
-                        v-for="point in formatBulletPoints(message.text)"
-                        :key="point"
-                      >
-                        {{ point }}
-                      </li>
-                    </ul>
-                  </template>
+                    class="markdown-body"
+                    v-html="renderMarkdown(message.text)"
+                  ></div>
 
                   <template v-else>
                     {{ message.text }}
                   </template>
                 </div>
+
+                <button
+                  v-if="isTypingMessage(message)"
+                  class="skip-animation-btn"
+                  @click.stop="$emit('skip-animation')"
+                  type="button"
+                >
+                  Skip
+                </button>
 
                 <div
                   v-if="
@@ -139,7 +141,7 @@
                     :class="{ selected: isDocumentSelected(document.id) }"
                     @click="$emit('open-document', document)"
                   >
-                    Pg 1: {{ document.name }}
+                    {{ document.name }}
                   </button>
                 </div>
               </template>
@@ -147,8 +149,9 @@
 
             <div
               v-if="
-                message.role === 'assistant' ||
-                message.role === 'comparison_result'
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result') &&
+                !isInterruptedMessage(message)
               "
               class="response-actions"
             >
@@ -169,15 +172,36 @@
                 type="button"
                 title="Read aloud"
               >
-                🔊
-                <span>{{ speakingMessageId === message.id ? 'Reading...' : 'Read Aloud' }}</span>
+                {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
+                <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
               </button>
             </div>
 
             <div
               v-if="
-                message.role === 'assistant' ||
-                message.role === 'comparison_result'
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result') &&
+                isInterruptedMessage(message)
+              "
+              class="response-actions"
+            >
+              <button
+                class="response-action-btn"
+                :class="{ speaking: speakingMessageId === message.id }"
+                @click="readResponseAloud(message)"
+                type="button"
+                title="Read aloud"
+              >
+                {{ speakingMessageId === message.id ? '⏹' : '🔊' }}
+                <span>{{ speakingMessageId === message.id ? 'Stop' : 'Read Aloud' }}</span>
+              </button>
+            </div>
+
+            <div
+              v-if="
+                (message.role === 'assistant' ||
+                  message.role === 'comparison_result') &&
+                !isInterruptedMessage(message)
               "
               class="response-rating-card"
               :class="{
@@ -196,8 +220,9 @@
                     active: star <= displayRating(message.id),
                     locked: star <= selectedRating(message.id)
                   }"
-                  @mouseenter="setHoverRating(message.id, star)"
-                  @mouseleave="clearHoverRating(message.id)"
+                  :disabled="!!selectedRating(message.id)"
+                  @mouseenter="!selectedRating(message.id) && setHoverRating(message.id, star)"
+                  @mouseleave="!selectedRating(message.id) && clearHoverRating(message.id)"
                   @click="selectRating(message.id, star)"
                   type="button"
                 >
@@ -227,10 +252,21 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+marked.setOptions({ breaks: true })
+
+function renderMarkdown(text: string): string {
+  const raw = marked.parse(text) as string
+  return DOMPurify.sanitize(raw)
+}
+
 type MessageDocument = {
   id: string
   name: string
-  file: File
+  documentPath?: string
+  file?: File
 }
 
 type MessageRole = 'user' | 'assistant' | 'thinking' | 'comparison_result'
@@ -242,6 +278,8 @@ type Message = {
   fileNames?: string[]
   docReference?: string
   documents?: MessageDocument[]
+  answerId?: string
+  rating?: number
 }
 
 type ChatItem = {
@@ -268,6 +306,8 @@ const emit = defineEmits<{
   (e: 'open-document', document: MessageDocument): void
   (e: 'scroll-state', isNearBottom: boolean): void
   (e: 'three-perfect-ratings'): void
+  (e: 'skip-animation'): void
+  (e: 'rate-answer', answerId: string | null, rating: number): void
 }>()
 
 const chatBodyRef = ref<HTMLElement | null>(null)
@@ -300,12 +340,6 @@ const consecutiveFiveStarCount = computed(() => {
   return count
 })
 
-function formatBulletPoints(text: string) {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map(point => point.trim())
-    .filter(point => point.length > 0)
-}
 
 function isTypingMessage(message: Message) {
   return message.role === 'assistant' && props.generatingMessageId === message.id
@@ -337,6 +371,19 @@ watch(
   () => {
     scrollToBottom()
   }
+)
+
+watch(
+  () => props.currentChat?.messages.map(m => m.id).join(','),
+  () => {
+    if (!props.currentChat) return
+    for (const message of props.currentChat.messages) {
+      if (message.rating && !ratings.value[message.id]) {
+        ratings.value[message.id] = message.rating
+      }
+    }
+  },
+  { immediate: true }
 )
 
 watch(
@@ -379,6 +426,9 @@ function selectRating(messageId: number, rating: number) {
     }
   }, 900)
 
+  const message = props.currentChat?.messages.find(msg => msg.id === messageId)
+  emit('rate-answer', message?.answerId ?? null, rating)
+
   if (consecutiveFiveStarCount.value >= 3) {
     emit('three-perfect-ratings')
   }
@@ -399,6 +449,12 @@ function copyResponseText(messageId: number) {
 }
 
 function readResponseAloud(message: Message) {
+  if (speakingMessageId.value === message.id) {
+    window.speechSynthesis.cancel()
+    speakingMessageId.value = null
+    return
+  }
+
   if (!message.text) return
 
   window.speechSynthesis.cancel()
@@ -691,18 +747,132 @@ function readResponseAloud(message: Message) {
   animation: assistantBubbleIn 0.34s ease;
 }
 
-.formatted-answer ul {
-  margin: 0;
-  padding-left: 20px;
+.markdown-body {
+  line-height: 1.7;
+  color: #dfe6f5;
+  word-break: break-word;
 }
 
-.formatted-answer li {
-  margin-bottom: 8px;
+.markdown-body :deep(p) {
+  margin: 0 0 10px;
+}
+
+.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4),
+.markdown-body :deep(h5),
+.markdown-body :deep(h6) {
+  margin: 16px 0 8px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.3;
+}
+
+.markdown-body :deep(h1) { font-size: 1.4em; }
+.markdown-body :deep(h2) { font-size: 1.25em; }
+.markdown-body :deep(h3) { font-size: 1.1em; }
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 6px 0 10px;
+  padding-left: 22px;
+}
+
+.markdown-body :deep(li) {
+  margin-bottom: 4px;
   line-height: 1.7;
 }
 
-.formatted-answer li:last-child {
+.markdown-body :deep(li:last-child) {
   margin-bottom: 0;
+}
+
+.markdown-body :deep(code) {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #93c5fd;
+}
+
+.markdown-body :deep(pre) {
+  margin: 10px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(5, 8, 18, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow-x: auto;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: #c9d1e0;
+  font-size: 13px;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 10px 0;
+  padding: 8px 14px;
+  border-left: 3px solid rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: 0 8px 8px 0;
+  color: #9eb4d4;
+}
+
+.markdown-body :deep(blockquote p) {
+  margin: 0;
+}
+
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: rgba(255, 255, 255, 0.05);
+  color: #c8d6f0;
+  font-weight: 600;
+}
+
+.markdown-body :deep(a) {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown-body :deep(a:hover) {
+  color: #93c5fd;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 14px 0;
+}
+
+.markdown-body :deep(strong) {
+  color: #f0f4ff;
+  font-weight: 700;
+}
+
+.markdown-body :deep(em) {
+  color: #c8d6f0;
 }
 
 .comparisonResultBubble {
@@ -755,6 +925,25 @@ function readResponseAloud(message: Message) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.skip-animation-btn {
+  margin-top: 10px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #8792aa;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.skip-animation-btn:hover {
+  color: #ffffff;
+  border-color: rgba(77, 163, 255, 0.35);
+  background: rgba(19, 135, 255, 0.08);
 }
 
 .assistant-document-links {
@@ -926,6 +1115,10 @@ function readResponseAloud(message: Message) {
 
 .star-btn.locked {
   animation: starPop 0.3s ease;
+}
+
+.star-btn:disabled {
+  cursor: default;
 }
 
 .rating-reaction {

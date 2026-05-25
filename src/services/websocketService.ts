@@ -1,19 +1,58 @@
-import {ref, onUnmounted} from 'vue';
-import type {MessageRequest} from '@/models/messageRequest';
-import type {MessageResponse} from '@/models/messageResponse';
-import {Client, IMessage} from '@stomp/stompjs';
+import { ref, onUnmounted } from 'vue';
+import type { MessageRequest } from '@/models/messageRequest';
+import type { MessageResponse } from '@/models/messageResponse';
+import { Client } from '@stomp/stompjs';
+import type { IMessage } from '@stomp/stompjs';
+import { authService } from '@/services/authService';
 
-export function useChatService(){
+/** Reconnect 2 minutes before access-token expiry. */
+const REFRESH_BUFFER_MS = 2 * 60 * 1000;
+
+export function useChatService(onMessageReceived?: (msg: MessageResponse) => void) {
     const messages = ref<{ id: number; text: string; sender: string }[]>([]);
     const isConnected = ref(false);
     const isLoading = ref(false);
+    let tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearRefreshTimer = () => {
+        if (tokenRefreshTimer) {
+            clearTimeout(tokenRefreshTimer);
+            tokenRefreshTimer = null;
+        }
+    };
+
+    /**
+     * Schedule a proactive reconnect so the server always sees a valid JWT.
+     * When the timer fires the client disconnects and immediately re-activates,
+     * which triggers beforeConnect → fresh token → new STOMP CONNECT.
+     */
+    const scheduleTokenRefresh = (expiresOn: Date | null) => {
+        clearRefreshTimer();
+        if (!expiresOn) return;
+
+        const msUntilRefresh = expiresOn.getTime() - Date.now() - REFRESH_BUFFER_MS;
+        if (msUntilRefresh <= 0) return;
+
+        tokenRefreshTimer = setTimeout(async () => {
+            console.info('Access token expiring soon — reconnecting with fresh token');
+            await stompClient.deactivate();
+            stompClient.activate();
+        }, msUntilRefresh);
+    };
 
     const stompClient = new Client({
-        brokerURL: 'ws://localhost:8082/ws',
+        brokerURL: (import.meta.env.VITE_CHAT_SERVICE_URL || 'http://localhost:8082').replace(/^http/, 'ws') + '/ws',
+        beforeConnect: async () => {
+            const result = await authService.getValidBackendToken();
+            if (result) {
+                stompClient.connectHeaders = { Authorization: `Bearer ${result.accessToken}` };
+                scheduleTokenRefresh(authService.getBackendTokenExpiry());
+            }
+        },
         onConnect: () => {
             console.log('WebSocket connected');
             isConnected.value = true;
-            stompClient.subscribe('/topic/message', (msg: IMessage) => {
+            stompClient.subscribe('/user/queue/message', (msg: IMessage) => {
                 const body: MessageResponse = JSON.parse(msg.body);
                 messages.value.push({
                     id: Date.now(),
@@ -21,6 +60,7 @@ export function useChatService(){
                     sender: body.sender,
                 });
                 isLoading.value = false;
+                onMessageReceived?.(body);
             });
         },
         onDisconnect: () => {
@@ -36,9 +76,13 @@ export function useChatService(){
         debug: (str) => console.log(str),
     });
 
-    const connect = () => stompClient.activate();
+    const connect = () => {
+        console.info('Connecting to WebSocket...');
+        stompClient.activate();
+    };
 
     const disconnect = () => {
+        clearRefreshTimer();
         if (stompClient.active) {
             stompClient.deactivate();
         }
