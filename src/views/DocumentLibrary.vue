@@ -301,25 +301,17 @@ const displayName = computed(() => {
 const displayRole = computed(() => {
   const account = userStore.account
   const fullName = account?.name || ''
-
   const roleFromName = fullName.match(/\(([^)]+)\)/)?.[1]
 
-  if (roleFromName) {
-    return roleFromName
-  }
+  if (roleFromName) return roleFromName
 
   const roles =
     (account as any)?.idTokenClaims?.roles ||
     (account as any)?.idTokenClaims?.extension_Role ||
     (account as any)?.idTokenClaims?.role
 
-  if (Array.isArray(roles) && roles.length > 0) {
-    return roles[0]
-  }
-
-  if (typeof roles === 'string' && roles.trim()) {
-    return roles
-  }
+  if (Array.isArray(roles) && roles.length > 0) return roles[0]
+  if (typeof roles === 'string' && roles.trim()) return roles
 
   const email = account?.username?.toLowerCase() || ''
 
@@ -346,9 +338,7 @@ const selectedChatName = computed(() => {
 const filteredSidebarChats = computed(() => {
   const query = sidebarSearchQuery.value.trim().toLowerCase()
 
-  if (!query) {
-    return sidebarChats.value
-  }
+  if (!query) return sidebarChats.value
 
   return sidebarChats.value.filter(chat =>
     chat.name.toLowerCase().includes(query)
@@ -362,9 +352,7 @@ const selectedChatDocuments = computed(() => {
 const filteredDocuments = computed(() => {
   const query = documentSearchQuery.value.trim().toLowerCase()
 
-  if (!query) {
-    return selectedChatDocuments.value
-  }
+  if (!query) return selectedChatDocuments.value
 
   return selectedChatDocuments.value.filter(doc =>
     doc.name.toLowerCase().includes(query) ||
@@ -416,10 +404,7 @@ function loadGeneratedDocuments() {
 }
 
 function toggleTheme() {
-  themeTransition.value =
-    isLightTheme.value
-      ? 'dark-wipe'
-      : 'light-wipe'
+  themeTransition.value = isLightTheme.value ? 'dark-wipe' : 'light-wipe'
 
   window.setTimeout(() => {
     isLightTheme.value = !isLightTheme.value
@@ -449,8 +434,7 @@ function selectChatForDocuments(chatId: number) {
 }
 
 function toggleMenu(chatId: number) {
-  openMenuChatId.value =
-    openMenuChatId.value === chatId ? null : chatId
+  openMenuChatId.value = openMenuChatId.value === chatId ? null : chatId
 }
 
 function startRename(chatId: number) {
@@ -472,10 +456,7 @@ function saveRename(chatId: number) {
     chat.name = editingChatName.value.trim()
   }
 
-  localStorage.setItem(
-    'chatSidebarList',
-    JSON.stringify(sidebarChats.value)
-  )
+  localStorage.setItem('chatSidebarList', JSON.stringify(sidebarChats.value))
 
   editingChatId.value = null
   editingChatName.value = ''
@@ -495,10 +476,7 @@ function deleteChat(chatId: number) {
     selectedChatId.value = sidebarChats.value[0].id
   }
 
-  localStorage.setItem(
-    'chatSidebarList',
-    JSON.stringify(sidebarChats.value)
-  )
+  localStorage.setItem('chatSidebarList', JSON.stringify(sidebarChats.value))
 
   openMenuChatId.value = null
 }
@@ -523,16 +501,8 @@ onMounted(() => {
   color: #ffffff;
   font-family: 'Inter', sans-serif;
   background:
-    radial-gradient(
-      circle at center,
-      rgba(0, 102, 255, 0.05) 0%,
-      transparent 35%
-    ),
-    linear-gradient(
-      180deg,
-      #05070d 0%,
-      #03050a 100%
-    );
+    radial-gradient(circle at center, rgba(0, 102, 255, 0.05) 0%, transparent 35%),
+    linear-gradient(180deg, #05070d 0%, #03050a 100%);
 }
 
 .document-main {
@@ -541,26 +511,20 @@ onMounted(() => {
   height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(
-      circle at center,
-      rgba(0, 102, 255, 0.05) 0%,
-      transparent 35%
-    ),
-    linear-gradient(
-      180deg,
-      #05070d 0%,
-      #03050a 100%
-    );
+    radial-gradient(circle at center, rgba(0, 102, 255, 0.05) 0%, transparent 35%),
+    linear-gradient(180deg, #05070d 0%, #03050a 100%);
+  animation: pageFadeIn 0.45s ease both;
 }
 
 .document-header {
-  height: 86px;
+  height: 74px;
   padding: 0 28px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
   background: linear-gradient(90deg, rgba(11, 16, 30, 0.96), rgba(8, 12, 22, 0.78));
   display: flex;
   align-items: center;
   justify-content: space-between;
+  animation: headerSlideDown 0.45s ease both;
 }
 
 .document-header h1 {
@@ -577,21 +541,25 @@ onMounted(() => {
 }
 
 .document-content {
-  height: calc(100vh - 86px);
-  padding: 18px 28px 28px;
+  height: calc(100vh - 74px);
+  padding: 18px 26px 20px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .document-toolbar {
-  padding: 0 0 18px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-bottom: 16px;
+  animation: toolbarFadeUp 0.5s ease both;
 }
 
 .document-search {
-  width: 360px;
-  height: 38px;
+  width: min(360px, 38vw);
+  height: 40px;
   border-radius: 12px;
   background: rgba(16, 20, 32, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -614,9 +582,15 @@ onMounted(() => {
   font-size: 14px;
 }
 
+.document-search:focus-within {
+  border-color: rgba(88, 128, 238, 0.75);
+  box-shadow: 0 0 0 3px rgba(88, 128, 238, 0.12);
+  transform: translateY(-1px);
+}
+
 .filter-btn,
 .view-buttons button {
-  height: 38px;
+  height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
   background: rgba(16, 20, 32, 0.88);
@@ -633,7 +607,9 @@ onMounted(() => {
 }
 
 .table-card {
-  height: calc(100vh - 160px);
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
   border-radius: 16px;
   background: rgba(16, 20, 32, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -643,50 +619,106 @@ onMounted(() => {
   box-shadow:
     0 0 22px rgba(47, 140, 255, 0.06),
     inset 0 0 18px rgba(255, 255, 255, 0.025);
+  animation: tableReveal 0.55s ease both;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+thead {
+  flex: 0 0 auto;
+}
+
+tbody {
+  display: block;
+  flex: 1;
+  overflow-y: auto;
+}
+
+thead,
+tbody tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
 }
 
 th {
   height: 42px;
   text-align: left;
   color: #9aa3b8;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 850;
-  padding: 0 16px;
+  padding: 0 14px;
+  background: rgba(16, 20, 32, 0.96);
 }
 
 td {
-  height: 66px;
-  padding: 0 16px;
+  height: 62px;
+  padding: 0 14px;
   color: #b9c1d4;
   font-size: 13px;
   border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+th:first-child,
+td:first-child {
+  width: 46px;
+}
+
+th:last-child,
+td:last-child {
+  width: 130px;
 }
 
 tbody tr {
   transition:
     background 0.18s ease,
     box-shadow 0.18s ease;
+  animation: rowFadeIn 0.35s ease both;
 }
 
 tbody tr:hover {
   background: rgba(88, 128, 238, 0.045);
 }
 
+tbody tr:nth-child(1) {
+  animation-delay: 0.04s;
+}
+
+tbody tr:nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+tbody tr:nth-child(3) {
+  animation-delay: 0.12s;
+}
+
+tbody tr:nth-child(4) {
+  animation-delay: 0.16s;
+}
+
+tbody tr:nth-child(5) {
+  animation-delay: 0.2s;
+}
+
 .doc-name {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .doc-name strong {
   display: block;
   color: #f4f7ff;
   font-size: 13px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .doc-name span {
@@ -697,6 +729,7 @@ tbody tr:hover {
 .file-icon {
   width: 30px;
   height: 30px;
+  flex: 0 0 auto;
   border-radius: 8px;
   font-size: 9px;
   display: flex;
@@ -705,6 +738,14 @@ tbody tr:hover {
   font-weight: 800;
   background: rgba(88, 128, 238, 0.16);
   color: #9ab4ff;
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+tbody tr:hover .file-icon {
+  transform: scale(1.08) rotate(-3deg);
+  box-shadow: 0 0 18px rgba(88, 128, 238, 0.18);
 }
 
 .file-icon.pdf {
@@ -748,6 +789,7 @@ tbody tr:hover {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  animation: statusPulse 1.6s ease-in-out infinite;
 }
 
 .status.failed {
@@ -791,21 +833,24 @@ tbody tr:hover {
 }
 
 .empty-state {
-  min-height: 420px;
+  height: calc(100vh - 250px);
+  min-height: 300px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  animation: emptyFloatIn 0.55s ease both;
 }
 
 .empty-state h3 {
   margin: 0 0 8px;
   color: #f5f7ff;
   font-size: 18px;
+  animation: softGlowText 2.8s ease-in-out infinite;
 }
 
 .empty-state p {
-  max-width: 620px;
+  max-width: 560px;
   margin: 0;
   color: #9aa3b8;
   font-size: 14px;
@@ -814,15 +859,16 @@ tbody tr:hover {
 }
 
 .table-footer {
-  margin-top: auto;
-  height: 60px;
-  padding: 0 20px;
+  flex: 0 0 54px;
+  height: 54px;
+  padding: 0 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.045);
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: #9aa3b8;
   font-size: 12px;
+  animation: footerFadeUp 0.5s ease both;
 }
 
 .pagination {
@@ -847,6 +893,28 @@ tbody tr:hover {
 
 .pagination button:disabled {
   opacity: 0.45;
+}
+
+.document-search,
+.filter-btn,
+.view-buttons button,
+.actions button,
+.pagination button,
+.theme-toggle-btn {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.filter-btn:hover,
+.view-buttons button:hover,
+.actions button:hover,
+.pagination button:hover {
+  transform: translateY(-2px);
+  border-color: rgba(88, 128, 238, 0.5);
+  box-shadow: 0 8px 20px rgba(47, 140, 255, 0.12);
 }
 
 .document-slide-enter-active,
@@ -878,11 +946,7 @@ tbody tr:hover {
   box-shadow:
     inset 0 0 18px rgba(255, 255, 255, 0.04),
     0 0 18px rgba(47, 140, 255, 0.16);
-  transition:
-    width 0.38s ease,
-    transform 0.22s ease,
-    box-shadow 0.22s ease,
-    background 0.22s ease;
+  animation: themeIdleGlow 2.4s ease-in-out infinite;
 }
 
 .theme-toggle-btn.lightActive {
@@ -1195,6 +1259,126 @@ tbody tr:hover {
   animation-delay: 0.9s !important;
 }
 
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes headerSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toolbarFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tableReveal {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rowFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(255, 107, 107, 0);
+  }
+
+  50% {
+    transform: scale(1.35);
+    box-shadow: 0 0 12px currentColor;
+  }
+}
+
+@keyframes emptyFloatIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes softGlowText {
+  0%, 100% {
+    text-shadow: 0 0 0 rgba(88, 128, 238, 0);
+  }
+
+  50% {
+    text-shadow: 0 0 18px rgba(88, 128, 238, 0.28);
+  }
+}
+
+@keyframes footerFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes themeIdleGlow {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 18px rgba(255, 255, 255, 0.04),
+      0 0 18px rgba(47, 140, 255, 0.16);
+  }
+
+  50% {
+    box-shadow:
+      inset 0 0 18px rgba(255, 255, 255, 0.055),
+      0 0 26px rgba(47, 140, 255, 0.28);
+  }
+}
+
 @keyframes cloudPass {
   from {
     transform: translateX(-45px);
@@ -1254,6 +1438,26 @@ tbody tr:hover {
   50% {
     transform: scale(1.3);
     opacity: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .document-header {
+    padding: 0 18px;
+  }
+
+  .document-content {
+    padding: 14px 18px 18px;
+  }
+
+  .document-search {
+    width: 260px;
+  }
+
+  th,
+  td {
+    padding: 0 10px;
+    font-size: 12px;
   }
 }
 </style>

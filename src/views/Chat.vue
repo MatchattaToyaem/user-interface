@@ -14,11 +14,9 @@ import LightTheme from '@/components/LightTheme.vue'
 import Intro from '@/components/Intro.vue'
 import ThemeEffects from '@/components/ThemeEffects.vue'
 import AIPetModal from '@/components/AIPetModal.vue'
-import DocViewer from '@/components/DocViewer.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
-import docLogo from '@/assets/doc-logo.png'
 
 type MessageDocument = {
   id: string
@@ -55,7 +53,6 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const showIntro = ref(false)
-const isConnected = ref(false)
 const aiStatus = ref('Connecting...')
 const isSidebarExpanded = ref(true)
 const isBrandHovered = ref(false)
@@ -97,7 +94,6 @@ const activeTypingIntervals = new Set<number>()
 const assistantReplyCount = ref(0)
 const isGenerating = ref(false)
 const isDocLoading = ref(false)
-const isDocViewerOpen = ref(false)
 const generatingMessageId = ref<number | null>(null)
 const thinkingMessageId = ref<number | null>(null)
 const previewFile = ref<File | null>(null)
@@ -107,7 +103,6 @@ const isChatNearBottom = ref(true)
 const docLoadToken = ref(0)
 const documentServiceUrl = import.meta.env.VITE_DOCUMENT_SERVICE_URL || 'http://localhost:8083'
 
-// Real WebSocket connection from the current branch
 const { isConnected, connect, disconnect, sendMessage: wsSendMessage } = useChatService(handleWsMessage)
 
 const displayName = computed(() => {
@@ -171,6 +166,7 @@ watch(
   },
   { deep: true, immediate: true }
 )
+
 const selectedChatId = ref(1)
 let nextChatId = 2
 let nextMessageId = 1
@@ -198,39 +194,6 @@ const selectedChatName = computed(() => {
 
 const showWelcome = computed(() => {
   return !!currentChat.value && currentChat.value.messages.length === 0
-})
-
-const supportedPreviewText = computed(() => {
-  return 'PDF, Word and Excel previews are supported'
-})
-
-const currentPreviewFileName = computed(() => {
-  return previewFile.value?.name || previewFileName.value || 'No document selected'
-})
-
-const isPdfPreview = computed(() => {
-  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
-  return !!name && name.endsWith('.pdf')
-})
-
-const isImagePreview = computed(() => {
-  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
-  return name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')
-})
-
-const isWordPreview = computed(() => {
-  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
-  return name.endsWith('.doc') || name.endsWith('.docx')
-})
-
-const isExcelPreview = computed(() => {
-  const name = (previewFile.value?.name || previewFileName.value).toLowerCase()
-  return name.endsWith('.xls') || name.endsWith('.xlsx') || name.endsWith('.csv')
-})
-
-const officeViewerUrl = computed(() => {
-  if (!previewFileUrl.value) return ''
-  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewFileUrl.value)}`
 })
 
 function typeLoop() {
@@ -268,17 +231,13 @@ function typeAssistantMessage(
 
   typingIntervalId = window.setInterval(() => {
     typed += fullText[index]
-
     done(typed)
-
     index++
 
     if (index >= fullText.length) {
       if (typingIntervalId !== null) {
         clearInterval(typingIntervalId)
-
         activeTypingIntervals.delete(typingIntervalId)
-
         typingIntervalId = null
       }
 
@@ -295,6 +254,7 @@ function typeAssistantMessage(
       activeTypingIntervals.delete(typingIntervalId)
       typingIntervalId = null
     }
+
     skipCurrentTyping = null
     done(fullText)
     complete()
@@ -305,7 +265,6 @@ function handleSkipAnimation() {
   skipCurrentTyping?.()
 }
 
-// Handles real AI responses from the WebSocket (from the current branch)
 function handleWsMessage(response: MessageResponse) {
   const selectedChat = chats.value.find(chat => chat.id === selectedChatId.value)
   if (!selectedChat) return
@@ -335,7 +294,6 @@ function handleWsMessage(response: MessageResponse) {
   }
 
   generatingMessageId.value = assistantMessage.id
-
   updateAIStatus('Responding...')
 
   typeAssistantMessage(
@@ -358,8 +316,7 @@ function handleWsMessage(response: MessageResponse) {
       syncPreviewFileFromCurrentChat()
     }
   )
-}
-
+} 
 function toggleSidebar() {
   isSidebarExpanded.value = !isSidebarExpanded.value
 }
@@ -375,7 +332,6 @@ function handleBrandButtonClick() {
 
 async function expandAndFocusSearch() {
   isSidebarExpanded.value = true
-
   await nextTick()
 }
 
@@ -446,7 +402,6 @@ function renameChat(chatId: number) {
 
   editingChatId.value = chatId
   editingChatName.value = chat.name
-
   openMenuChatId.value = null
 }
 
@@ -474,14 +429,17 @@ function cancelInlineRename() {
 
 async function deleteChat(chatId: number) {
   const chat = chats.value.find(c => c.id === chatId)
+
   if (chat) {
-    chatSessionService.deleteSession(chat.sessionId)
+    await chatSessionService.deleteSession(chat.sessionId)
   }
 
   if (chats.value.length === 1) {
     await startNewChat()
+
     const oldIndex = chats.value.findIndex(c => c.id === chatId)
     if (oldIndex !== -1) chats.value.splice(oldIndex, 1)
+
     openMenuChatId.value = null
     inputValue.value = ''
     return
@@ -501,7 +459,12 @@ async function deleteChat(chatId: number) {
 }
 
 async function startNewChat() {
-  const userEmail = authService.getCurrentUser()?.email || userStore.account?.username || localStorage.getItem('userEmail') || 'anonymous'
+  const userEmail =
+    authService.getCurrentUser()?.email ||
+    userStore.account?.username ||
+    localStorage.getItem('userEmail') ||
+    'anonymous'
+
   const session = await chatSessionService.createSession({
     chatName: 'New Chat',
     userName: userEmail,
@@ -518,25 +481,19 @@ async function startNewChat() {
   }
 
   chats.value.unshift(newChat)
-
   selectedChatId.value = newChat.id
 
   inputValue.value = ''
   searchQuery.value = ''
-
   openMenuChatId.value = null
 }
 
 function getFileBadge(fileName: string) {
-  const extension =
-    fileName.split('.').pop()?.toLowerCase() || ''
+  const extension = fileName.split('.').pop()?.toLowerCase() || ''
 
   if (extension === 'pdf') return 'PDF'
-
   if (['doc', 'docx'].includes(extension)) return 'DOC'
-
   if (['xls', 'xlsx', 'csv'].includes(extension)) return 'XLS'
-
   if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 'IMG'
 
   return 'FILE'
@@ -549,6 +506,7 @@ function setPreviewFile(file: File) {
 
   previewFile.value = file
   previewFileUrl.value = URL.createObjectURL(file)
+  previewFileName.value = file.name
 }
 
 function clearPreviewFile() {
@@ -561,21 +519,18 @@ function clearPreviewFile() {
   previewFileUrl.value = ''
 }
 
-function createMessageDocuments(files: File[]): MessageDocument[] {
-  return files.map((file, index) => ({
-    id: `${file.name}-${file.lastModified}-${file.size}-${index}-${Date.now()}`,
-    name: file.name,
-    file
-  }))
-}
-
 async function fetchDocumentBlob(documentPath: string): Promise<string> {
   const token = await authService.getToken()
+
   const response = await fetch(
     `${documentServiceUrl}/documents/file?path=${encodeURIComponent(documentPath)}`,
     token ? { headers: { Authorization: `Bearer ${token}` } } : {}
   )
-  if (!response.ok) throw new Error(`Failed to fetch document: ${response.status}`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch document: ${response.status}`)
+  }
+
   const blob = await response.blob()
   return URL.createObjectURL(blob)
 }
@@ -583,20 +538,30 @@ async function fetchDocumentBlob(documentPath: string): Promise<string> {
 async function loadDocumentPreview(document: MessageDocument) {
   if (document.file) {
     setPreviewFile(document.file)
-  } else if (document.documentPath) {
-    if (previewFileUrl.value) URL.revokeObjectURL(previewFileUrl.value)
+    return
+  }
+
+  if (document.documentPath) {
+    if (previewFileUrl.value) {
+      URL.revokeObjectURL(previewFileUrl.value)
+    }
+
     previewFile.value = null
     previewFileName.value = document.name
     previewFileUrl.value = ''
+
     try {
       previewFileUrl.value = await fetchDocumentBlob(document.documentPath)
-    } catch (e) {
-      console.error('Failed to load document from document-service:', e)
+    } catch (error) {
+      console.error('Failed to load document from document-service:', error)
     }
   }
 }
 
-function findDocumentByIdInChat(chat: ChatItem | null, documentId: string | null | undefined) {
+function findDocumentByIdInChat(
+  chat: ChatItem | null,
+  documentId: string | null | undefined
+) {
   if (!chat || !documentId) return null
 
   for (const message of chat.messages) {
@@ -646,9 +611,9 @@ function syncPreviewFileFromChat(chat: ChatItem | null) {
 
   clearPreviewFile()
 }
-
 function triggerDocLoading(delayMs: number) {
   isDocLoading.value = true
+
   window.setTimeout(() => {
     isDocLoading.value = false
   }, delayMs)
@@ -660,7 +625,9 @@ function syncPreviewFileFromCurrentChat() {
 
 function handleRateAnswer(answerId: string | null, rating: number) {
   const sessionId = currentChat.value?.sessionId
+
   if (!sessionId || !answerId) return
+
   chatSessionService.rateAnswer(sessionId, answerId, rating)
 }
 
@@ -714,19 +681,19 @@ function chooseComparisonOption(messageId: number, option: 'left' | 'right') {
 function isDocumentSelected(documentId: string) {
   const chat = currentChat.value
   if (!chat) return false
+
   return chat.selectedDocumentId === documentId
 }
 
 async function openDocumentFromMessage(document: MessageDocument) {
   const chat = currentChat.value
+
   if (chat) {
     chat.selectedDocumentId = document.id
   }
 
   docLoadToken.value = Date.now()
   isDocLoading.value = true
-  activeMode.value = 'doc'
-  isDocViewerOpen.value = true
 
   try {
     await loadDocumentPreview(document)
@@ -749,9 +716,7 @@ function stopGeneration() {
 
   if (typingIntervalId !== null) {
     clearInterval(typingIntervalId)
-
     activeTypingIntervals.delete(typingIntervalId)
-
     typingIntervalId = null
   }
 
@@ -786,7 +751,6 @@ function stopGeneration() {
   updateAIStatus('Ready')
 }
 
-// Sends the user message via real WebSocket (from the current branch)
 function sendMessage() {
   const text = inputValue.value.trim()
 
@@ -818,7 +782,6 @@ function sendMessage() {
   updateAIStatus('Thinking...')
 
   const newThinkingMessageId = nextMessageId++
-
   thinkingMessageId.value = newThinkingMessageId
 
   currentChat.value.messages.push({
@@ -867,7 +830,7 @@ async function handleLogout() {
   router.push('/login')
 }
 
-onMounted(() => {
+onMounted(async () => {
   const hasSeenIntro = sessionStorage.getItem('seenIntro')
 
   if (!hasSeenIntro) {
@@ -881,8 +844,9 @@ onMounted(() => {
     showIntro.value = false
   }
 
+  connect()
+
   window.setTimeout(() => {
-    isConnected.value = true
     updateAIStatus('Ready to chat!')
   }, 1800)
 
@@ -907,10 +871,16 @@ onMounted(() => {
 
   try {
     const sessions = await chatSessionService.getSessionsByUser(userEmail)
+
     if (sessions && sessions.length > 0) {
       const sorted = [...sessions].sort(
-        (a, b) => new Date(b.lastAccess).getTime() - new Date(a.lastAccess).getTime()
+        (a, b) =>
+          new Date(b.lastAccess).getTime() -
+          new Date(a.lastAccess).getTime()
       )
+
+      chats.value = []
+
       for (const session of sorted) {
         chats.value.push({
           id: nextChatId++,
@@ -920,6 +890,7 @@ onMounted(() => {
           selectedDocumentId: null
         })
       }
+
       selectedChatId.value = chats.value[0].id
       await selectChatById(chats.value[0].id)
     } else {
@@ -1026,32 +997,29 @@ onBeforeUnmount(() => {
               @toggle-theme="toggleTheme"
             />
 
-                    <ChatMessages
-            :class="{ introMessages: showIntro }"
-            :current-chat="currentChat"
-            :show-welcome="showWelcome"
-            :display-name="displayName"
-            :animated-text="animatedText"
-            :main-logo="mainLogo"
-            :ai-logo="mainLogo"
-            :is-document-selected="isDocumentSelected"
-            :get-file-badge="getFileBadge"
-            :generating-message-id="generatingMessageId"
-            @close-menu="openMenuChatId = null"
-            @open-document="openDocumentFromMessage"
-            @scroll-state="handleChatScrollState"
-            @three-perfect-ratings="triggerFireworks"
-            @skip-animation="handleSkipAnimation"
-            @rate-answer="handleRateAnswer"
-          />
+            <ChatMessages
+              :class="{ introMessages: showIntro }"
+              :current-chat="currentChat"
+              :show-welcome="showWelcome"
+              :display-name="displayName"
+              :animated-text="animatedText"
+              :main-logo="mainLogo"
+              :ai-logo="mainLogo"
+              :is-document-selected="isDocumentSelected"
+              :get-file-badge="getFileBadge"
+              :generating-message-id="generatingMessageId"
+              @close-menu="openMenuChatId = null"
+              @open-document="openDocumentFromMessage"
+              @scroll-state="handleChatScrollState"
+              @three-perfect-ratings="triggerFireworks"
+              @skip-animation="handleSkipAnimation"
+              @rate-answer="handleRateAnswer"
+            />
 
             <div :class="{ introInput: showIntro }">
               <Transition name="reply-indicator">
                 <div
-                  v-if="
-                    isGenerating &&
-                    !isChatNearBottom
-                  "
+                  v-if="isGenerating && !isChatNearBottom"
                   class="floating-reply-indicator"
                 >
                   <span></span>
@@ -1070,7 +1038,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </main>
-      </Transition>  
+      </Transition>
     </div>
   </LightTheme>
 </template>
