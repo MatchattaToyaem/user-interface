@@ -27,6 +27,9 @@ definitions:
               --build-arg VITE_AZURE_AUTHORITY=$VITE_AZURE_AUTHORITY
               --build-arg VITE_AZURE_REDIRECT_URI=$VITE_AZURE_REDIRECT_URI
               --build-arg VITE_AZURE_SCOPE=$VITE_AZURE_SCOPE
+              --build-arg VITE_AUTH_SERVICE_URL=$VITE_AUTH_SERVICE_URL
+              --build-arg VITE_CHAT_SERVICE_URL=$VITE_CHAT_SERVICE_URL
+              --build-arg VITE_DOCUMENT_SERVICE_URL=$VITE_DOCUMENT_SERVICE_URL
               -t oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT .
           - docker tag oconnoraiplatform.azurecr.io/user-interface:$BITBUCKET_COMMIT
               oconnoraiplatform.azurecr.io/user-interface:latest
