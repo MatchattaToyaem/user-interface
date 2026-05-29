@@ -73,6 +73,34 @@
         />
       </div>
 
+      <div class="main-nav">
+        <RouterLink
+          to="/chat"
+          class="main-nav-item"
+          :class="{ active: route.path === '/chat' || route.path === '/' }"
+        >
+          <img
+            :src="aiLogo"
+            alt="Chatbot"
+            class="main-nav-img"
+          />
+          <span>Chatbot</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/documents"
+          class="main-nav-item"
+          :class="{ active: route.path === '/documents' || route.path === '/document-library' }"
+        >
+          <img
+            :src="docLogoImage"
+            alt="Document Library"
+            class="main-nav-img"
+          />
+          <span>Document Library</span>
+        </RouterLink>
+      </div>
+
       <div class="history-section">
         <p class="history-title">CHAT HISTORY</p>
 
@@ -177,6 +205,34 @@
 
     <template v-else>
       <div class="collapsed-rail">
+        <RouterLink
+          to="/chat"
+          class="collapsed-rail-item"
+          :class="{ selected: route.path === '/chat' || route.path === '/' }"
+          title="Chatbot"
+        >
+          <img
+            :src="aiLogo"
+            alt="Chatbot"
+            class="collapsed-nav-img"
+          />
+          <span class="collapsed-tooltip">Chatbot</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/documents"
+          class="collapsed-rail-item"
+          :class="{ selected: route.path === '/documents' || route.path === '/document-library' }"
+          title="Document Library"
+        >
+          <img
+            :src="docLogoImage"
+            alt="Document Library"
+            class="collapsed-nav-img"
+          />
+          <span class="collapsed-tooltip">Document Library</span>
+        </RouterLink>
+
         <button
           class="collapsed-rail-item"
           @click="$emit('expand-search')"
@@ -252,6 +308,12 @@
 </template>
 
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
+import aiLogo from '@/assets/ai-logo.png'
+import docLogoImage from '@/assets/doc-logo.png'
+
+const route = useRoute()
+
 type ChatItem = {
   id: number
   name: string
@@ -589,7 +651,7 @@ defineEmits<{
   border-radius: 14px;
   background: rgba(9, 14, 28, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  margin-bottom: 22px;
+  margin-bottom: 20px;
   transition:
     border-color 0.22s ease,
     box-shadow 0.22s ease,
@@ -614,6 +676,64 @@ defineEmits<{
   outline: none;
   color: #d8def0;
   font-size: 14px;
+}
+
+.main-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.main-nav-item {
+  min-height: 50px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 0 16px;
+  color: #a8b1c8;
+  text-decoration: none;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  transition:
+    background 0.22s ease,
+    color 0.22s ease,
+    border-color 0.22s ease,
+    transform 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.main-nav-item:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(88, 128, 238, 0.35),
+    0 0 16px rgba(88, 128, 238, 0.45),
+    0 0 32px rgba(88, 128, 238, 0.25);
+}
+
+.main-nav-item.active {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 18px rgba(17, 132, 255, 0.08);
+}
+
+.main-nav-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  border-radius: 0;
+  flex-shrink: 0;
+  display: block;
 }
 
 .history-section {
@@ -863,13 +983,6 @@ defineEmits<{
   padding-top: 10px;
 }
 
-.collapsed-rail-divider {
-  width: 36px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  margin: 4px 0 2px;
-}
-
 .collapsed-rail-item,
 .collapsed-user-btn,
 .collapsed-logout-btn {
@@ -883,9 +996,11 @@ defineEmits<{
   justify-content: center;
   cursor: pointer;
   position: relative;
+  text-decoration: none;
   transition:
     background 0.22s ease,
-    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.22s ease;
 }
 
 .collapsed-rail-item:hover,
@@ -893,6 +1008,11 @@ defineEmits<{
 .collapsed-logout-btn:hover {
   background: rgba(255, 255, 255, 0.06);
   transform: translateY(-1px);
+}
+
+.collapsed-rail-item.selected {
+  background: rgba(255, 255, 255, 0.11);
+  box-shadow: 0 0 12px rgba(77, 163, 255, 0.14);
 }
 
 .collapsed-rail-icon {
@@ -903,6 +1023,14 @@ defineEmits<{
 
 .collapsed-chat-logo {
   border-radius: 50%;
+}
+
+.collapsed-nav-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  border-radius: 0;
+  display: block;
 }
 
 .collapsed-search-icon,
@@ -935,12 +1063,6 @@ defineEmits<{
 .collapsed-logout-btn:hover .collapsed-tooltip {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
-}
-
-.current-chat-tooltip {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .collapsed-recents-wrap {
