@@ -135,7 +135,28 @@
                   </tr>
                 </thead>
 
-                <tbody v-if="filteredDocuments.length">
+                <tbody v-if="isLoading">
+                  <tr>
+                    <td colspan="7">
+                      <div class="empty-state">
+                        <p>Loading failed documents…</p>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+
+                <tbody v-else-if="fetchError">
+                  <tr>
+                    <td colspan="7">
+                      <div class="empty-state">
+                        <h3>Could not load documents</h3>
+                        <p>{{ fetchError }}</p>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+
+                <tbody v-else-if="filteredDocuments.length">
                   <tr
                     v-for="doc in filteredDocuments"
                     :key="doc.id"
@@ -180,17 +201,9 @@
 
                     <td>
                       <div class="actions">
-                        <button type="button" title="Retry processing">
-                          ↻
-                        </button>
-
-                        <button type="button" title="View details">
-                          ▣
-                        </button>
-
-                        <button type="button" title="More options">
-                          ⋮
-                        </button>
+                        <button type="button" title="Retry processing">↻</button>
+                        <button type="button" title="View details">▣</button>
+                        <button type="button" title="More options">⋮</button>
                       </div>
                     </td>
                   </tr>
@@ -213,13 +226,33 @@
 
               <footer class="table-footer">
                 <span>
-                  Showing {{ filteredDocuments.length }} of {{ selectedChatDocuments.length }} entries
+                  Showing {{ filteredDocuments.length }} of {{ totalElements }} entries
                 </span>
 
                 <div class="pagination">
-                  <button disabled>Previous</button>
-                  <button class="active">1</button>
-                  <button>Next</button>
+                  <button
+                    :disabled="currentPage === 0 || isLoading"
+                    @click="goToPage(currentPage - 1)"
+                  >
+                    Previous
+                  </button>
+
+                  <button
+                    v-for="p in totalPages"
+                    :key="p"
+                    :class="{ active: p - 1 === currentPage }"
+                    :disabled="isLoading"
+                    @click="goToPage(p - 1)"
+                  >
+                    {{ p }}
+                  </button>
+
+                  <button
+                    :disabled="currentPage >= totalPages - 1 || isLoading"
+                    @click="goToPage(currentPage + 1)"
+                  >
+                    Next
+                  </button>
                 </div>
               </footer>
             </section>
@@ -244,6 +277,8 @@ import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
 
+const documentServiceUrl = import.meta.env.VITE_DOCUMENT_SERVICE_URL || 'http://localhost:8083'
+
 type ChatItem = {
   id: number
   name: string
@@ -251,9 +286,20 @@ type ChatItem = {
   selectedDocumentId?: string | null
 }
 
+type FailedDocumentResponse = {
+  id: number
+  fileName: string
+  sharepointPath: string | null
+  sharepointId: string | null
+  etag: string | null
+  lastModified: string | null
+  lastProcessed: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
 type DocumentItem = {
   id: string
-  chatId: number
   name: string
   size: string
   fileType: string
@@ -290,6 +336,12 @@ const sidebarChats = ref<ChatItem[]>([
 
 const documentSearchQuery = ref('')
 const documents = ref<DocumentItem[]>([])
+const isLoading = ref(false)
+const fetchError = ref<string | null>(null)
+const currentPage = ref(0)
+const pageSize = ref(20)
+const totalElements = ref(0)
+const totalPages = ref(0)
 
 const displayName = computed(() => {
   const fullName = userStore.account?.name?.trim() || 'User'
@@ -345,16 +397,12 @@ const filteredSidebarChats = computed(() => {
   )
 })
 
-const selectedChatDocuments = computed(() => {
-  return documents.value.filter(doc => doc.chatId === selectedChatId.value)
-})
-
 const filteredDocuments = computed(() => {
   const query = documentSearchQuery.value.trim().toLowerCase()
 
-  if (!query) return selectedChatDocuments.value
+  if (!query) return documents.value
 
-  return selectedChatDocuments.value.filter(doc =>
+  return documents.value.filter(doc =>
     doc.name.toLowerCase().includes(query) ||
     doc.fileType.toLowerCase().includes(query) ||
     doc.issue.toLowerCase().includes(query) ||
@@ -362,6 +410,75 @@ const filteredDocuments = computed(() => {
     doc.sourceChat.toLowerCase().includes(query)
   )
 })
+
+function getExtension(fileName: string): string {
+  const parts = fileName.split('.')
+  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : 'file'
+}
+
+function getFileType(extension: string): string {
+  const map: Record<string, string> = {
+    pdf: 'PDF', doc: 'Word', docx: 'Word',
+    xls: 'Excel', xlsx: 'Excel',
+    png: 'Image', jpg: 'Image', jpeg: 'Image',
+  }
+  return map[extension] ?? extension.toUpperCase()
+}
+
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  return new Date(dateStr).toLocaleDateString('en-AU', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+
+async function fetchFailedDocuments(page = 0) {
+  isLoading.value = true
+  fetchError.value = null
+
+  try {
+    const token = await authService.getToken()
+    const url = `${documentServiceUrl}/documents/failed?page=${page}&size=${pageSize.value}`
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+
+    const response = await fetch(url, { headers })
+
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`)
+    }
+
+    const data = await response.json()
+
+    currentPage.value = data.page
+    totalPages.value = data.totalPages
+    totalElements.value = data.totalElements
+
+    documents.value = (data.content as FailedDocumentResponse[]).map(doc => {
+      const ext = getExtension(doc.fileName)
+      return {
+        id: String(doc.id),
+        name: doc.fileName,
+        extension: ext,
+        fileType: getFileType(ext),
+        failedDate: formatDate(doc.lastProcessed ?? doc.updatedAt),
+        issue: 'Extraction Failed',
+        sourceChat: doc.sharepointPath ?? '—',
+        status: 'Failed' as const,
+        size: '—',
+      }
+    })
+  } catch (err) {
+    fetchError.value = err instanceof Error ? err.message : 'Failed to load documents'
+    documents.value = []
+  } finally {
+    isLoading.value = false
+  }
+}
+
+function goToPage(page: number) {
+  if (page < 0 || page >= totalPages.value) return
+  fetchFailedDocuments(page)
+}
 
 function loadSidebarChats() {
   const savedChats = localStorage.getItem('chatSidebarList')
@@ -384,22 +501,6 @@ function loadSidebarChats() {
         selectedDocumentId: null
       }
     ]
-  }
-}
-
-function loadGeneratedDocuments() {
-  const savedDocuments = localStorage.getItem('unprocessedDocuments')
-
-  if (!savedDocuments) return
-
-  try {
-    const parsedDocuments = JSON.parse(savedDocuments) as DocumentItem[]
-
-    if (Array.isArray(parsedDocuments)) {
-      documents.value = parsedDocuments
-    }
-  } catch {
-    documents.value = []
   }
 }
 
@@ -488,7 +589,7 @@ async function handleLogout() {
 
 onMounted(() => {
   loadSidebarChats()
-  loadGeneratedDocuments()
+  fetchFailedDocuments(0)
 })
 </script>
 
