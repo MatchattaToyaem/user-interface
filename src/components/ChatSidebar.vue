@@ -101,7 +101,7 @@
         </RouterLink>
       </div>
 
-      <div class="history-section">
+      <div v-if="showHistory" class="history-section">
         <p class="history-title">CHAT HISTORY</p>
 
         <TransitionGroup
@@ -242,7 +242,7 @@
           <span class="collapsed-tooltip">Search</span>
         </button>
 
-        <div class="collapsed-recents-wrap">
+        <div v-if="showHistory" class="collapsed-recents-wrap">
           <button
             class="collapsed-rail-item selected-chat-item"
             title="Recents"
@@ -321,8 +321,9 @@ type ChatItem = {
   selectedDocumentId?: string | null
 }
 
-defineProps<{
+withDefaults(defineProps<{
   showIntro: boolean
+  showHistory?: boolean
   isSidebarExpanded: boolean
   isBrandHovered: boolean
   mainLogo: string
@@ -338,7 +339,9 @@ defineProps<{
   displayRole: string
   userInitial: string
   userPhoto: string
-}>()
+}>(), {
+  showHistory: true,
+})
 
 defineEmits<{
   (e: 'toggle-sidebar'): void

@@ -769,10 +769,15 @@ function sendMessage() {
   })
 
   if (currentChat.value.name === 'New Chat') {
-    currentChat.value.name =
-      text.length > 28
-        ? text.slice(0, 28) + '...'
-        : text
+    const newName = text.length > 28 ? text.slice(0, 28) + '...' : text
+    currentChat.value.name = newName
+
+    chatSessionService.updateSession(currentChat.value.sessionId, {
+      chatName: newName,
+      userName: userEmail,
+      createdBy: userEmail,
+      status: 'active',
+    })
   }
 
   inputValue.value = ''

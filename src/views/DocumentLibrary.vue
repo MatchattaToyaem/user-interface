@@ -8,6 +8,7 @@
 
       <ChatSidebar
         :show-intro="false"
+        :show-history="false"
         :is-sidebar-expanded="isSidebarExpanded"
         :is-brand-hovered="isBrandHovered"
         :main-logo="isLightTheme ? logoPng : mainLogo"
@@ -500,7 +501,9 @@ async function downloadDocument(doc: DocumentItem) {
     const anchor = document.createElement('a')
     anchor.href = objectUrl
     anchor.download = doc.name
+    document.body.appendChild(anchor)
     anchor.click()
+    document.body.removeChild(anchor)
     URL.revokeObjectURL(objectUrl)
   } catch (err) {
     console.error('Download failed:', err)
@@ -978,7 +981,7 @@ tbody tr:hover .file-icon {
 .actions {
   display: flex;
   gap: 8px;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .actions button {
