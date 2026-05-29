@@ -197,7 +197,7 @@
                       </span>
                     </td>
 
-                    <td>{{ doc.sourceChat }}</td>
+                    <td :title="doc.sourceChat">{{ doc.sourceChat }}</td>
 
                     <td>
                       <div class="actions">
@@ -425,6 +425,14 @@ function getFileType(extension: string): string {
   return map[extension] ?? extension.toUpperCase()
 }
 
+function extractPathLabel(path: string | null | undefined): string {
+  if (!path) return '—'
+  const parts = path.split('/').filter(Boolean)
+  const sharedIdx = parts.findIndex(p => p.toLowerCase() === 'shared documents')
+  const tail = sharedIdx >= 0 ? parts.slice(sharedIdx + 1) : parts.slice(-2)
+  return tail.join(' / ') || path
+}
+
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('en-AU', {
@@ -462,7 +470,7 @@ async function fetchFailedDocuments(page = 0) {
         fileType: getFileType(ext),
         failedDate: formatDate(doc.lastProcessed ?? doc.updatedAt),
         issue: 'Extraction Failed',
-        sourceChat: doc.sharepointPath ?? '—',
+        sourceChat: extractPathLabel(doc.sharepointPath),
         status: 'Failed' as const,
         size: '—',
       }
@@ -769,9 +777,37 @@ td:first-child {
   width: 46px;
 }
 
+th:nth-child(2),
+td:nth-child(2) {
+  width: 28%;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+  width: 86px;
+}
+
+th:nth-child(4),
+td:nth-child(4) {
+  width: 108px;
+}
+
+th:nth-child(5),
+td:nth-child(5) {
+  width: 136px;
+}
+
+th:nth-child(6),
+td:nth-child(6) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
+}
+
 th:last-child,
 td:last-child {
-  width: 130px;
+  width: 112px;
 }
 
 tbody tr {
@@ -810,21 +846,30 @@ tbody tr:nth-child(5) {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.doc-name > div {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .doc-name strong {
   display: block;
   color: #f4f7ff;
   font-size: 13px;
-  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .doc-name span {
+  display: block;
   color: #8f98ad;
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-icon {
@@ -960,15 +1005,17 @@ tbody tr:hover .file-icon {
 }
 
 .table-footer {
-  flex: 0 0 54px;
-  height: 54px;
+  flex: 0 0 auto;
+  min-height: 54px;
   padding: 0 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.045);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   color: #9aa3b8;
   font-size: 12px;
+  flex-wrap: wrap;
   animation: footerFadeUp 0.5s ease both;
 }
 
@@ -976,6 +1023,7 @@ tbody tr:hover .file-icon {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .pagination button {
@@ -985,6 +1033,7 @@ tbody tr:hover .file-icon {
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(8, 11, 19, 0.55);
   color: #aab3c8;
+  cursor: pointer;
 }
 
 .pagination button.active {
@@ -994,6 +1043,7 @@ tbody tr:hover .file-icon {
 
 .pagination button:disabled {
   opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .document-search,
