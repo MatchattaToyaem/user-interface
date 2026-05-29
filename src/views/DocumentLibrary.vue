@@ -102,19 +102,6 @@
                 placeholder="Search unprocessed documents..."
               />
             </div>
-
-            <button class="filter-btn" type="button">
-              Issue Type
-            </button>
-
-            <button class="filter-btn" type="button">
-              Failed Date
-            </button>
-
-            <div class="view-buttons">
-              <button type="button">☷</button>
-              <button type="button">▦</button>
-            </div>
           </section>
 
           <Transition name="document-slide" mode="out-in">
@@ -122,6 +109,7 @@
               :key="selectedChatId"
               class="table-card"
             >
+              <div class="table-scroll">
               <table>
                 <thead>
                   <tr>
@@ -201,9 +189,14 @@
 
                     <td>
                       <div class="actions">
-                        <button type="button" title="Retry processing">↻</button>
-                        <button type="button" title="View details">▣</button>
-                        <button type="button" title="More options">⋮</button>
+                        <button
+                          type="button"
+                          title="Download file"
+                          class="download-btn"
+                          @click="downloadDocument(doc)"
+                        >
+                          ↓
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -223,6 +216,7 @@
                   </tr>
                 </tbody>
               </table>
+              </div>
 
               <footer class="table-footer">
                 <span>
@@ -306,6 +300,7 @@ type DocumentItem = {
   failedDate: string
   issue: string
   sourceChat: string
+  sharepointPath: string | null
   status: 'Failed' | 'Unsupported' | 'Needs Review'
   extension: string
 }
@@ -339,7 +334,7 @@ const documents = ref<DocumentItem[]>([])
 const isLoading = ref(false)
 const fetchError = ref<string | null>(null)
 const currentPage = ref(0)
-const pageSize = ref(20)
+const pageSize = ref(10)
 const totalElements = ref(0)
 const totalPages = ref(0)
 
@@ -471,6 +466,7 @@ async function fetchFailedDocuments(page = 0) {
         failedDate: formatDate(doc.lastProcessed ?? doc.updatedAt),
         issue: 'Extraction Failed',
         sourceChat: extractPathLabel(doc.sharepointPath),
+        sharepointPath: doc.sharepointPath ?? null,
         status: 'Failed' as const,
         size: '—',
       }
@@ -486,6 +482,29 @@ async function fetchFailedDocuments(page = 0) {
 function goToPage(page: number) {
   if (page < 0 || page >= totalPages.value) return
   fetchFailedDocuments(page)
+}
+
+async function downloadDocument(doc: DocumentItem) {
+  if (!doc.sharepointPath) return
+
+  try {
+    const token = await authService.getToken()
+    const url = `${documentServiceUrl}/documents/file?path=${encodeURIComponent(doc.sharepointPath)}`
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+
+    const response = await fetch(url, { headers })
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`)
+
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = doc.name
+    anchor.click()
+    URL.revokeObjectURL(objectUrl)
+  } catch (err) {
+    console.error('Download failed:', err)
+  }
 }
 
 function loadSidebarChats() {
@@ -697,7 +716,6 @@ onMounted(() => {
   transform: translateY(-1px);
 }
 
-.filter-btn,
 .view-buttons button {
   height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -731,27 +749,22 @@ onMounted(() => {
   animation: tableReveal 0.55s ease both;
 }
 
+.table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-thead {
-  flex: 0 0 auto;
-}
-
-tbody {
-  display: block;
-  flex: 1;
-  overflow-y: auto;
-}
-
-thead,
-tbody tr {
-  display: table;
-  width: 100%;
-  table-layout: fixed;
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 th {
@@ -978,6 +991,13 @@ tbody tr:hover .file-icon {
   cursor: pointer;
 }
 
+.download-btn {
+  font-size: 15px;
+  font-weight: 700;
+  color: #7eb6ff !important;
+  border-color: rgba(88, 128, 238, 0.25) !important;
+}
+
 .empty-state {
   height: calc(100vh - 250px);
   min-height: 300px;
@@ -1047,7 +1067,6 @@ tbody tr:hover .file-icon {
 }
 
 .document-search,
-.filter-btn,
 .view-buttons button,
 .actions button,
 .pagination button,
@@ -1059,7 +1078,6 @@ tbody tr:hover .file-icon {
     background 0.2s ease;
 }
 
-.filter-btn:hover,
 .view-buttons button:hover,
 .actions button:hover,
 .pagination button:hover {
