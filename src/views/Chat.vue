@@ -10,6 +10,7 @@ import ChatMessages from '@/components/ChatMessages.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
 import ChatTopbar from '@/components/ChatTopbar.vue'
+import DocViewer from '@/components/DocViewer.vue'
 import LightTheme from '@/components/LightTheme.vue'
 import Intro from '@/components/Intro.vue'
 import ThemeEffects from '@/components/ThemeEffects.vue'
@@ -17,6 +18,7 @@ import AIPetModal from '@/components/AIPetModal.vue'
 import mainLogo from '@/assets/oconnors-logo.png'
 import logoPng from '@/assets/logo.png'
 import chatLogo from '@/assets/chat-logo.png'
+import docLogo from '@/assets/doc-logo.png'
 
 type MessageDocument = {
   id: string
@@ -195,6 +197,35 @@ const selectedChatName = computed(() => {
 const showWelcome = computed(() => {
   return !!currentChat.value && currentChat.value.messages.length === 0
 })
+
+const isDocOpen = computed(() =>
+  isDocLoading.value || !!previewFileUrl.value || !!previewFile.value
+)
+
+const previewExtension = computed(() =>
+  previewFileName.value.split('.').pop()?.toLowerCase() ?? ''
+)
+
+const isPdfPreview = computed(() => previewExtension.value === 'pdf')
+const isWordPreview = computed(() => ['doc', 'docx'].includes(previewExtension.value))
+const isExcelPreview = computed(() => ['xls', 'xlsx', 'csv'].includes(previewExtension.value))
+const isImagePreview = computed(() => ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(previewExtension.value))
+
+const officeViewerUrl = computed(() =>
+  previewFileUrl.value
+    ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(previewFileUrl.value)}`
+    : ''
+)
+
+const supportedPreviewText = 'Supported formats: PDF, Word, Excel, PNG, JPG'
+
+function closeDocViewer() {
+  if (previewFileUrl.value) URL.revokeObjectURL(previewFileUrl.value)
+  previewFile.value = null
+  previewFileName.value = ''
+  previewFileUrl.value = ''
+  if (currentChat.value) currentChat.value.selectedDocumentId = null
+}
 
 function typeLoop() {
   const currentPhrase = phrases[phraseIndex]
@@ -1042,6 +1073,24 @@ onBeforeUnmount(() => {
               />
             </div>
           </div>
+
+          <DocViewer
+            :is-open="isDocOpen"
+            :current-chat="currentChat"
+            :preview-file="previewFile"
+            :preview-file-url="previewFileUrl"
+            :current-preview-file-name="previewFileName"
+            :is-doc-loading="isDocLoading"
+            :is-pdf-preview="isPdfPreview"
+            :is-word-preview="isWordPreview"
+            :is-excel-preview="isExcelPreview"
+            :is-image-preview="isImagePreview"
+            :office-viewer-url="officeViewerUrl"
+            :supported-preview-text="supportedPreviewText"
+            :doc-logo="docLogo"
+            :get-file-badge="getFileBadge"
+            @close="closeDocViewer"
+          />
         </main>
       </Transition>
     </div>
