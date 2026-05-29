@@ -103,6 +103,22 @@
                 placeholder="Search unprocessed documents..."
               />
             </div>
+
+            <div class="date-filter">
+              <label>From</label>
+              <input v-model="filterFrom" type="date" class="date-input" />
+              <label>To</label>
+              <input v-model="filterTo" type="date" class="date-input" />
+              <button
+                v-if="filterFrom || filterTo"
+                class="clear-date-btn"
+                type="button"
+                title="Clear date filter"
+                @click="clearDateFilter"
+              >
+                ✕
+              </button>
+            </div>
           </section>
 
           <Transition name="document-slide" mode="out-in">
@@ -259,7 +275,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore'
 import { authService } from '@/services/authService'
@@ -338,6 +354,8 @@ const currentPage = ref(0)
 const pageSize = ref(10)
 const totalElements = ref(0)
 const totalPages = ref(0)
+const filterFrom = ref('')
+const filterTo = ref('')
 
 const displayName = computed(() => {
   const fullName = userStore.account?.name?.trim() || 'User'
@@ -442,7 +460,13 @@ async function fetchFailedDocuments(page = 0) {
 
   try {
     const token = await authService.getToken()
-    const url = `${documentServiceUrl}/documents/failed?page=${page}&size=${pageSize.value}`
+    const params = new URLSearchParams({
+      page: String(page),
+      size: String(pageSize.value),
+      ...(filterFrom.value ? { from: filterFrom.value } : {}),
+      ...(filterTo.value   ? { to:   filterTo.value   } : {}),
+    })
+    const url = `${documentServiceUrl}/documents/failed?${params}`
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
 
     const response = await fetch(url, { headers })
@@ -484,6 +508,15 @@ function goToPage(page: number) {
   if (page < 0 || page >= totalPages.value) return
   fetchFailedDocuments(page)
 }
+
+function clearDateFilter() {
+  filterFrom.value = ''
+  filterTo.value = ''
+}
+
+watch([filterFrom, filterTo], () => {
+  fetchFailedDocuments(0)
+})
 
 async function downloadDocument(doc: DocumentItem) {
   if (!doc.sharepointPath) return
@@ -717,6 +750,66 @@ onMounted(() => {
   border-color: rgba(88, 128, 238, 0.75);
   box-shadow: 0 0 0 3px rgba(88, 128, 238, 0.12);
   transform: translateY(-1px);
+}
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-filter label {
+  color: #8b93a8;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.date-input {
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(16, 20, 32, 0.88);
+  color: #d8def0;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: rgba(88, 128, 238, 0.75);
+  box-shadow: 0 0 0 3px rgba(88, 128, 238, 0.12);
+}
+
+.date-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
+}
+
+.clear-date-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(220, 76, 76, 0.12);
+  color: #ff8b8b;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.clear-date-btn:hover {
+  background: rgba(220, 76, 76, 0.24);
+  transform: scale(1.08);
 }
 
 .view-buttons button {
